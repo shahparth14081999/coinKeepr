@@ -1,0 +1,172 @@
+.mediaViewInfo {
+	--web-view-name: GS Consumer Form;
+	--web-view-id: GS_Consumer_Form;
+	--web-scale-to-fit: true;
+	--web-scale-to-fit-type: width;
+	--web-scale-on-resize: true;
+	--web-enable-deep-linking: true;
+}
+:root {
+	--web-view-ids: GS_Consumer_Form;
+}
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+	border: none;
+}
+#GS_Consumer_Form {
+	position: absolute;
+	width: 1920px;
+	height: 1080px;
+	background-color: rgba(255,255,255,1);
+	overflow: hidden;
+	--web-view-name: GS Consumer Form;
+	--web-view-id: GS_Consumer_Form;
+	--web-scale-to-fit: true;
+	--web-scale-to-fit-type: width;
+	--web-scale-on-resize: true;
+	--web-enable-deep-linking: true;
+}
+@keyframes fadein {
+
+	0% {
+		opacity: 0;
+	}
+	100% {
+		opacity: 1;
+	}
+
+}
+#Background {
+	position: absolute;
+	width: 1982.975px;
+	height: 1080px;
+	left: -30.976px;
+	top: 0px;
+	overflow: visible;
+}
+#Path_1_bbt {
+	opacity: 0.15;
+}
+.Path_1_bbt {
+	overflow: visible;
+	position: absolute;
+	width: 687.82px;
+	height: 332.665px;
+	left: 0px;
+	top: 747.335px;
+	transform: matrix(1,0,0,1,0,0);
+}
+#Path_2 {
+	opacity: 0.1;
+}
+.Path_2 {
+	overflow: visible;
+	position: absolute;
+	width: 745.977px;
+	height: 576.301px;
+	left: 0px;
+	top: 0px;
+	transform: matrix(1,0,0,1,0,0);
+}
+#Path_3_bbw {
+	opacity: 0.15;
+}
+.Path_3_bbw {
+	overflow: visible;
+	position: absolute;
+	width: 646.108px;
+	height: 535.28px;
+	left: 1336.868px;
+	top: 0.708px;
+	transform: matrix(1,0,0,1,0,0);
+}
+#CONTACT_US {
+	position: absolute;
+	left: 1640.389px;
+	top: 72.33px;
+	overflow: visible;
+	width: 202px;
+	white-space: nowrap;
+	--web-animation: fadein 0.3s ease-out;
+	--web-action-type: page;
+	--web-action-target: Contact_Us___Consumer.html;
+	cursor: pointer;
+	text-align: left;
+	font-family: Montserrat;
+	font-style: normal;
+	font-weight: bold;
+	font-size: 30px;
+	color: rgba(12,55,90,1);
+}
+#Get_Started {
+	position: absolute;
+	left: 1318.653px;
+	top: 66.33px;
+	overflow: visible;
+	width: 287px;
+	white-space: nowrap;
+	--web-animation: fadein 0.3s ease-out;
+	--web-action-type: page;
+	--web-action-target: Get_Started___Consumer.html;
+	cursor: pointer;
+	text-align: left;
+	font-family: Montserrat;
+	font-style: normal;
+	font-weight: bold;
+	font-size: 40px;
+	color: rgba(12,55,90,1);
+}
+#SERVICE {
+	position: absolute;
+	left: 1129.027px;
+	top: 72.331px;
+	overflow: visible;
+	width: 135px;
+	white-space: nowrap;
+	--web-animation: fadein 0.3s ease-out;
+	--web-action-type: page;
+	--web-action-target: Service.html;
+	cursor: pointer;
+	text-align: left;
+	font-family: Montserrat;
+	font-style: normal;
+	font-weight: bold;
+	font-size: 30px;
+	color: rgba(12,55,90,1);
+}
+#Get_Started_bb {
+	position: absolute;
+	left: 975.653px;
+	top: 72.33px;
+	overflow: visible;
+	width: 99px;
+	white-space: nowrap;
+	--web-animation: fadein 0.3s ease-out;
+	--web-action-type: page;
+	--web-action-target: Home.html;
+	cursor: pointer;
+	text-align: left;
+	font-family: Montserrat;
+	font-style: normal;
+	font-weight: bold;
+	font-size: 30px;
+	color: rgba(12,55,90,1);
+}
+#Logo {
+	position: absolute;
+	width: 310.607px;
+	height: 175.464px;
+	left: 82.361px;
+	top: 42.758px;
+	overflow: visible;
+}
+#Logo_bb {
+	position: absolute;
+	width: 310.607px;
+	height: 175.464px;
+	left: 0px;
+	top: 0px;
+	overflow: visible;
+}

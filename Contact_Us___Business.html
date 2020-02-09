@@ -1,0 +1,3270 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Contact Us - Business</title>
+<link rel="stylesheet" type="text/css" id="applicationStylesheet" href="Contact_Us___Business.css"/>
+<script id="applicationScript">
+///////////////////////////////////////
+// INITIALIZATION
+///////////////////////////////////////
+
+/**
+ * Functionality for scaling, showing by media query, and navigation between multiple pages on a single page. 
+ * Code subject to change.
+ **/
+
+if (window.console==null) { window["console"] = { log : function() {} } }; // some browsers do not set console
+
+var Application = function() {
+	// event constants
+	this.NAVIGATION_CHANGE = "viewChange";
+	this.VIEW_NOT_FOUND = "viewNotFound";
+	this.VIEW_CHANGE = "viewChange";
+	this.STATE_NOT_FOUND = "stateNotFound";
+	this.APPLICATION_COMPLETE = "applicationComplete";
+	this.APPLICATION_RESIZE = "applicationResize";
+	this.SIZE_STATE_NAME = "data-is-view-scaled";
+
+	this.lastView = null;
+	this.lastState = null;
+	this.lastOverlay = null;
+	this.currentView = null;
+	this.currentState = null;
+	this.currentOverlay = null;
+	this.currentQuery = {index: 0, rule: null, mediaText: null, id: null};
+	this.inclusionQuery = "(min-width: 0px)";
+	this.exclusionQuery = "none and (min-width: 99999px)";
+	this.LastModifiedDateLabelName = "LastModifiedDateLabel";
+	this.viewScaleSliderId = "ViewScaleSliderInput";
+	this.pageRefreshedName = "showPageRefreshedNotification";
+	this.prefix = "--web-";
+	this.applicationStylesheet = null;
+	this.mediaQueryDictionary = {};
+	this.viewsDictionary = {};
+	this.addedViews = [];
+	this.views = {};
+	this.viewIds = [];
+	this.viewIds = [];
+	this.viewQueries = {};
+	this.overlays = {};
+	this.overlayIds = [];
+	this.numberOfViews = 0;
+	this.verticalPadding = 0;
+	this.horizontalPadding = 0;
+	this.stateName = null;
+	this.viewScale = 1;
+	this.viewLeft = 0;
+	this.viewTop = 0;
+
+	// view settings
+	this.showUpdateNotification = false;
+	this.showNavigationControls = false;
+	this.scaleViewsToFit = false;
+	this.scaleToFitOnDoubleClick = false;
+	this.actualSizeOnDoubleClick = false;
+	this.scaleViewsOnResize = false;
+	this.navigationOnKeypress = false;
+	this.showViewName = false;
+	this.enableDeepLinking = true;
+	this.refreshPageForChanges = false;
+	this.showRefreshNotifications = true;
+
+	// view controls
+	this.scaleViewSlider = null;
+	this.lastModifiedLabel = null;
+	this.supportsPopState = false; // window.history.pushState!=null;
+	this.initialized = false;
+
+	// refresh properties
+	this.refreshDuration = 250;
+	this.lastModifiedDate = null;
+	this.refreshRequest = null;
+	this.refreshInterval = null;
+	this.refreshContent = null;
+	this.refreshContentSize = null;
+	this.refreshCheckContent = false;
+	this.refreshCheckContentSize = false;
+
+	var self = this;
+
+	self.initialize = function(event) {
+		var view = self.getVisibleView();
+		if (view==null) view = self.getInitialView();
+		self.collectViews();
+		self.collectOverlays();
+		self.collectMediaQueries();
+		self.setViewOptions(view);
+		self.setViewVariables(view);
+
+		// sometimes the body size is 0 so we call this now and again later
+		if (self.initialized) {
+			window.addEventListener(self.NAVIGATION_CHANGE, self.viewChangeHandler);
+			window.addEventListener("keyup", self.keypressHandler);
+			window.addEventListener("keypress", self.keypressHandler);
+			window.addEventListener("resize", self.resizeHandler);
+			window.document.addEventListener("dblclick", self.doubleClickHandler);
+
+			if (self.supportsPopState) {
+				window.addEventListener('popstate', self.popStateHandler);
+			}
+			else {
+				window.addEventListener('hashchange', self.hashChangeHandler);
+			}
+
+			// we are ready to go
+			window.dispatchEvent(new Event(self.APPLICATION_COMPLETE));
+		}
+
+		if (self.initialized==false) {
+			if (self.showNavigationControls || (self.singlePageApplication && self.showByMediaQuery==false)) {
+				self.syncronizeViewToURL();
+			}
+	
+			if (self.refreshPageForChanges) {
+				self.setupRefreshForChanges();
+			}
+	
+			self.initialized = true;
+		}
+		
+		if (self.scaleViewsToFit) {
+			self.viewScale = self.scaleViewToFit(view);
+			
+			if (self.viewScale<0) {
+				setTimeout(self.scaleViewToFit, 500, view);
+			}
+		}
+		else if (view) {
+			self.viewScale = self.getViewScaleValue(view);
+			self.centerView(view);
+			self.updateSliderValue(self.viewScale);
+		}
+		else {
+			// no view found
+		}
+	
+		if (self.showUpdateNotification) {
+			self.showNotification();
+		}
+	
+		//"addEventListener" in window ? null : window.addEventListener = window.attachEvent;
+		//"addEventListener" in document ? null : document.addEventListener = document.attachEvent;
+	}
+
+
+	///////////////////////////////////////
+	// AUTO REFRESH 
+	///////////////////////////////////////
+
+	self.setupRefreshForChanges = function() {
+		self.refreshRequest = new XMLHttpRequest();
+
+		if (!self.refreshRequest) {
+			return false;
+		}
+
+		// get document start values immediately
+		self.requestRefreshUpdate();
+	}
+
+	/**
+	 * Attempt to check the last modified date by the headers 
+	 * or the last modified property from the byte array (experimental)
+	 **/
+	self.requestRefreshUpdate = function() {
+		var url = document.location.href;
+		var protocol = window.location.protocol;
+		var method;
+		
+		try {
+
+			if (self.refreshCheckContentSize) {
+				self.refreshRequest.open('HEAD', url, true);
+			}
+			else if (self.refreshCheckContent) {
+				self.refreshContent = document.documentElement.outerHTML;
+				self.refreshRequest.open('GET', url, true);
+				self.refreshRequest.responseType = "text";
+			}
+			else {
+
+				// get page last modified date for the first call to compare to later
+				if (self.lastModifiedDate==null) {
+
+					// File system does not send headers in FF so get blob if possible
+					if (protocol=="file:") {
+						self.refreshRequest.open("GET", url, true);
+						self.refreshRequest.responseType = "blob";
+					}
+					else {
+						self.refreshRequest.open("HEAD", url, true);
+						self.refreshRequest.responseType = "blob";
+					}
+
+					self.refreshRequest.onload = self.refreshOnLoadOnceHandler;
+
+					// In some browsers (Chrome & Safari) this error occurs at send: 
+					// 
+					// Chrome - Access to XMLHttpRequest at 'file:///index.html' from origin 'null' 
+					// has been blocked by CORS policy: 
+					// Cross origin requests are only supported for protocol schemes: 
+					// http, data, chrome, chrome-extension, https.
+					// 
+					// Safari - XMLHttpRequest cannot load file:///Users/user/Public/index.html. Cross origin requests are only supported for HTTP.
+					// 
+					// Solution is to run a local server, set local permissions or test in another browser
+					self.refreshRequest.send(null);
+
+					// In MS browsers the following behavior occurs possibly due to an AJAX call to check last modified date: 
+					// 
+					// DOM7011: The code on this page disabled back and forward caching.
+
+					// In Brave (Chrome) error when on the server
+					// index.js:221 HEAD https://www.example.com/ net::ERR_INSUFFICIENT_RESOURCES
+					// self.refreshRequest.send(null);
+
+				}
+				else {
+					self.refreshRequest = new XMLHttpRequest();
+					self.refreshRequest.onreadystatechange = self.refreshHandler;
+					self.refreshRequest.ontimeout = function() {
+						self.log("Couldn't find page to check for updates");
+					}
+					
+					var method;
+					if (protocol=="file:") {
+						method = "GET";
+					}
+					else {
+						method = "HEAD";
+					}
+
+					//refreshRequest.open('HEAD', url, true);
+					self.refreshRequest.open(method, url, true);
+					self.refreshRequest.responseType = "blob";
+					self.refreshRequest.send(null);
+				}
+			}
+		}
+		catch (error) {
+			self.log("Refresh failed for the following reason:")
+			self.log(error);
+		}
+	}
+
+	self.refreshHandler = function() {
+		var contentSize;
+
+		try {
+
+			if (self.refreshRequest.readyState === XMLHttpRequest.DONE) {
+				
+				if (self.refreshRequest.status === 2 || 
+					self.refreshRequest.status === 200) {
+					var pageChanged = false;
+
+					self.updateLastModifiedLabel();
+
+					if (self.refreshCheckContentSize) {
+						var lastModifiedHeader = self.refreshRequest.getResponseHeader("Last-Modified");
+						contentSize = self.refreshRequest.getResponseHeader("Content-Length");
+						//lastModifiedDate = refreshRequest.getResponseHeader("Last-Modified");
+						var headers = self.refreshRequest.getAllResponseHeaders();
+						var hasContentHeader = headers.indexOf("Content-Length")!=-1;
+						
+						if (hasContentHeader) {
+							contentSize = self.refreshRequest.getResponseHeader("Content-Length");
+
+							// size has not been set yet
+							if (self.refreshContentSize==null) {
+								self.refreshContentSize = contentSize;
+								// exit and let interval call this method again
+								return;
+							}
+
+							if (contentSize!=self.refreshContentSize) {
+								pageChanged = true;
+							}
+						}
+					}
+					else if (self.refreshCheckContent) {
+
+						if (self.refreshRequest.responseText!=self.refreshContent) {
+							pageChanged = true;
+						}
+					}
+					else {
+						lastModifiedHeader = self.getLastModified(self.refreshRequest);
+
+						if (self.lastModifiedDate!=lastModifiedHeader) {
+							self.log("lastModifiedDate:" + self.lastModifiedDate + ",lastModifiedHeader:" +lastModifiedHeader);
+							pageChanged = true;
+						}
+
+					}
+
+					
+					if (pageChanged) {
+						clearInterval(self.refreshInterval);
+						self.refreshUpdatedPage();
+						return;
+					}
+
+				}
+				else {
+					self.log('There was a problem with the request.');
+				}
+
+			}
+		}
+		catch( error ) {
+			//console.log('Caught Exception: ' + error);
+		}
+	}
+
+	self.refreshOnLoadOnceHandler = function(event) {
+
+		// get the last modified date
+		if (self.refreshRequest.response) {
+			self.lastModifiedDate = self.getLastModified(self.refreshRequest);
+
+			if (self.lastModifiedDate!=null) {
+
+				if (self.refreshInterval==null) {
+					self.refreshInterval = setInterval(self.requestRefreshUpdate, self.refreshDuration);
+				}
+			}
+			else {
+				self.log("Could not get last modified date from the server");
+			}
+		}
+	}
+
+	self.refreshUpdatedPage = function() {
+		if (self.showRefreshNotifications) {
+			var date = new Date().setTime((new Date().getTime()+10000));
+			document.cookie = encodeURIComponent(self.pageRefreshedName) + "=true" + "; max-age=6000;" + " path=/";
+		}
+
+		document.location.reload(true);
+	}
+
+	self.showNotification = function(duration) {
+		var notificationID = self.pageRefreshedName+"ID";
+		var notification = document.getElementById(notificationID);
+		if (duration==null) duration = 4000;
+
+		if (notification!=null) {return;}
+
+		notification = document.createElement("div");
+		notification.id = notificationID;
+		notification.textContent = "PAGE UPDATED";
+		var styleRule = ""
+		styleRule = "position: fixed; padding: 7px 16px 6px 16px; font-family: Arial, sans-serif; font-size: 10px; font-weight: bold; left: 50%;";
+		styleRule += "top: 20px; background-color: rgba(0,0,0,.5); border-radius: 12px; color:rgb(235, 235, 235); transition: all 2s linear;";
+		styleRule += "transform: translateX(-50%); letter-spacing: .5px; filter: drop-shadow(2px 2px 6px rgba(0, 0, 0, .1))";
+		notification.setAttribute("style", styleRule);
+
+		notification.className= "PageRefreshedClass";
+		
+		document.body.appendChild(notification);
+
+		setTimeout(function() {
+			notification.style.opacity = "0";
+			notification.style.filter = "drop-shadow( 0px 0px 0px rgba(0,0,0, .5))";
+			setTimeout(function() {
+				notification.parentNode.removeChild(notification);
+			}, duration)
+		}, duration);
+
+		document.cookie = encodeURIComponent(self.pageRefreshedName) + "=; max-age=1; path=/";
+	}
+
+	/**
+	 * Get the last modified date from the header 
+	 * or file object after request has been received
+	 **/
+	self.getLastModified = function(request) {
+		var date;
+
+		// file protocol - FILE object with last modified property
+		if (request.response && request.response.lastModified) {
+			date = request.response.lastModified;
+		}
+		
+		// http protocol - check headers
+		if (date==null) {
+			date = request.getResponseHeader("Last-Modified");
+		}
+
+		return date;
+	}
+
+	self.updateLastModifiedLabel = function() {
+		var labelValue = "";
+		
+		if (self.lastModifiedLabel==null) {
+			self.lastModifiedLabel = document.getElementById("LastModifiedLabel");
+		}
+
+		if (self.lastModifiedLabel) {
+			var seconds = parseInt(((new Date().getTime() - Date.parse(document.lastModified)) / 1000 / 60) * 100 + "");
+			var minutes = 0;
+			var hours = 0;
+
+			if (seconds < 60) {
+				seconds = Math.floor(seconds/10)*10;
+				labelValue = seconds + " seconds";
+			}
+			else {
+				minutes = parseInt((seconds/60) + "");
+
+				if (minutes>60) {
+					hours = parseInt((seconds/60/60) +"");
+					labelValue += hours==1 ? " hour" : " hours";
+				}
+				else {
+					labelValue = minutes+"";
+					labelValue += minutes==1 ? " minute" : " minutes";
+				}
+			}
+			
+			if (seconds<10) {
+				labelValue = "Updated now";
+			}
+			else {
+				labelValue = "Updated " + labelValue + " ago";
+			}
+
+			if (self.lastModifiedLabel.firstElementChild) {
+				self.lastModifiedLabel.firstElementChild.textContent = labelValue;
+
+			}
+			else if ("textContent" in self.lastModifiedLabel) {
+				self.lastModifiedLabel.textContent = labelValue;
+			}
+		}
+	}
+
+	self.getShortString = function(string, length) {
+		if (length==null) length = 30;
+		string = string!=null ? string.substr(0, length).replace(/\n/g, "") : "[String is null]";
+		return string;
+	}
+
+	self.getShortNumber = function(value, places) {
+		if (places==null || places<1) places = 4;
+		value = Math.round(value * Math.pow(10,places)) / Math.pow(10, places);
+		return value;
+	}
+
+	///////////////////////////////////////
+	// NAVIGATION CONTROLS
+	///////////////////////////////////////
+
+	self.updateViewLabel = function() {
+		var viewNavigationLabel = document.getElementById("ViewNavigationLabel");
+		var view = self.getVisibleView();
+		var viewIndex = view ? self.getViewIndex(view) : -1;
+		var viewName = view ? self.getViewPreferenceValue(view, self.prefix + "view-name") : null;
+		var viewId = view ? view.id : null;
+
+		if (viewNavigationLabel && view) {
+			if (viewName && viewName.indexOf('"')!=-1) {
+				viewName = viewName.replace(/"/g, "");
+			}
+
+			if (self.showViewName) {
+				viewNavigationLabel.textContent = viewName;
+				self.setTooltip(viewNavigationLabel, viewIndex + 1 + " of " + self.numberOfViews);
+			}
+			else {
+				viewNavigationLabel.textContent = viewIndex + 1 + " of " + self.numberOfViews;
+				self.setTooltip(viewNavigationLabel, viewName);
+			}
+
+		}
+	}
+
+	self.updateURL = function(view) {
+		view = view == null ? self.getVisibleView() : view;
+		var viewId = view ? view.id : null
+		var viewFragment = view ? "#"+ viewId : null;
+
+		if (viewId && self.viewIds.length>1 && self.enableDeepLinking) {
+
+			if (self.supportsPopState==false) {
+				self.setFragment(viewId);
+			}
+			else {
+				if (viewFragment!=window.location.hash) {
+
+					if (window.location.hash==null) {
+						window.history.replaceState({name:viewId}, null, viewFragment);
+					}
+					else {
+						window.history.pushState({name:viewId}, null, viewFragment);
+					}
+				}
+			}
+		}
+	}
+
+	self.setFragment = function(value) {
+		window.location.hash = "#" + value;
+	}
+
+	self.setTooltip = function(element, value) {
+		// setting the tooltip in edge causes a page crash on hover
+		if (/Edge/.test(navigator.userAgent)) { return; }
+
+		if ("title" in element) {
+			element.title = value;
+		}
+	}
+
+	self.getStylesheetRules = function(styleSheet) {
+		try {
+			if (styleSheet) return styleSheet.cssRules || styleSheet.rules;
+	
+			return document.styleSheets[0]["cssRules"] || document.styleSheets[0]["rules"];
+		}
+		catch (error) {
+			// ERRORS:
+			// SecurityError: The operation is insecure.
+			// Errors happen when script loads before stylesheet or loading an external css locally
+
+			// InvalidAccessError: A parameter or an operation is not supported by the underlying object
+			// Place script after stylesheet
+
+			console.log(error);
+			if (error.toString().indexOf("The operation is insecure")!=-1) {
+				console.log("Load the stylesheet before the script or load the stylesheet inline until it can be loaded on a server")
+			}
+			return [];
+		}
+	}
+
+	/**
+	 * If single page application hide all of the views. 
+	 * @param {Number} selectedIndex if provided shows the view at index provided
+	 **/
+	self.hideViews = function(selectedIndex, animation) {
+		var rules = self.getStylesheetRules();
+		var queryIndex = 0;
+		var numberOfRules = rules!=null ? rules.length : 0;
+
+		// loop through rules and hide media queries except selected
+		for (var i=0;i<numberOfRules;i++) {
+			var rule = rules[i];
+
+			if (rule.media!=null) {
+
+				if (queryIndex==selectedIndex) {
+					self.currentQuery.mediaText = rule.conditionText;
+					self.currentQuery.index = selectedIndex;
+					self.currentQuery.rule = rule;
+					self.enableMediaQuery(rule);
+				}
+				else {
+					if (animation) {
+						self.fadeOut(rule)
+					}
+					else {
+						self.disableMediaQuery(rule);
+					}
+				}
+				
+				queryIndex++;
+			}
+		}
+
+		self.numberOfViews = queryIndex;
+		self.updateViewLabel();
+		self.updateURL();
+
+		self.dispatchViewChange();
+
+		var view = self.getVisibleView();
+		var viewIndex = view ? self.getViewIndex(view) : -1;
+
+		return viewIndex==selectedIndex ? view : null;
+	}
+
+	/**
+	 * Hide view
+	 * @param {Object} view element to hide
+	 **/
+	self.hideView = function(view) {
+		var rule = view ? self.mediaQueryDictionary[view.id] : null;
+
+		if (rule) {
+			self.disableMediaQuery(rule);
+		}
+	}
+
+	/**
+	 * Hide overlay
+	 * @param {Object} overlay element to hide
+	 **/
+	self.hideOverlay = function(overlay) {
+		var rule = overlay ? self.mediaQueryDictionary[overlay.id] : null;
+
+		if (rule) {
+			self.disableMediaQuery(rule);
+
+			//if (self.showByMediaQuery) {
+				overlay.style.display = "none";
+			//}
+		}
+	}
+
+	/**
+	 * Show the view by media query. Does not hide current views
+	 * Sets view options by default
+	 * @param {Object} view element to show
+	 * @param {Boolean} setViewOptions sets view options if null or true
+	 */
+	self.showViewByMediaQuery = function(view, setViewOptions) {
+		var id = view ? view.id : null;
+		var query = id ? self.mediaQueryDictionary[id] : null;
+		var display = null;
+		setViewOptions = setViewOptions==null ? true : setViewOptions;
+
+		if (query) {
+			self.enableMediaQuery(query);
+			if (view && setViewOptions) self.setViewOptions(view);
+			if (view && setViewOptions) self.setViewVariables(view);
+		}
+	}
+
+	/**
+	 * Show the view. Does not hide current views
+	 */
+	self.showView = function(view, setViewOptions) {
+		var id = view ? view.id : null;
+		var query = id ? self.mediaQueryDictionary[id] : null;
+		var display = null;
+		setViewOptions = setViewOptions==null ? true : setViewOptions;
+
+		if (query) {
+			self.enableMediaQuery(query);
+			if (view==null) view =self.getVisibleView();
+			if (view && setViewOptions) self.setViewOptions(view);
+		}
+		else if (id) {
+			display = window.getComputedStyle(view).getPropertyValue("display");
+			if (display=="" || display=="none") {
+				view.style.display = "block";
+			}
+		}
+
+		if (view) {
+			if (self.currentView!=null) {
+				self.lastView = self.currentView;
+			}
+
+			self.currentView = view;
+		}
+	}
+
+	self.showViewById = function(id, setViewOptions) {
+		var view = id ? self.getViewById(id) : null;
+
+		if (view) {
+			self.showView(view);
+			return;
+		}
+
+		self.log("View not found '" + id + "'");
+	}
+
+	/**
+	 * Show overlay over view
+	 * @param {String} id id of view or view reference
+	 * @param {Number} x x location
+	 * @param {Number} y y location
+	 * @param {Event | HTMLElement} event event or html element with styles applied
+	 */
+	self.showOverlay = function(id, x, y, event) {
+		var overlay = id && typeof id === 'string' ? self.getViewById(id) : id ? id : null;
+		var query = overlay ? self.mediaQueryDictionary[overlay.id] : null;
+		var centerHorizontally = false;
+		var centerVertically = false;
+		var display = null;
+
+		// get enter animation - event target must have css variables declared
+		if (event) {
+			var button = event.currentTarget || event; // can be event or htmlelement
+			var buttonComputedStyles = getComputedStyle(button);
+			var actionTargetValue = buttonComputedStyles.getPropertyValue(self.prefix+"action-target").trim();
+			var animation = buttonComputedStyles.getPropertyValue(self.prefix+"animation").trim();
+			var targetType = buttonComputedStyles.getPropertyValue(self.prefix+"action-type").trim();
+			var actionTarget = self.application ? null : self.getElement(actionTargetValue);
+			var actionTargetStyles = actionTarget ? actionTarget.style : null;
+
+			if (actionTargetStyles) {
+				actionTargetStyles.setProperty("animation", animation);
+			}
+
+			if ("stopImmediatePropagation" in event) {
+				event.stopImmediatePropagation();
+			}
+		}
+		
+		if (self.application==false || targetType=="page") {
+			document.location.href = "./" + actionTargetValue;
+			return;
+		}
+
+		// remove any current overlays
+		if (self.currentOverlay) {
+			self.removeOverlay();
+		}
+
+		if (query) {
+			//self.setElementAnimation(overlay, null);
+			//overlay.style.animation = animation;
+			self.enableMediaQuery(query);
+			
+			var display = overlay && overlay.style.display;
+			
+			if (overlay && display=="" || display=="none") {
+				overlay.style.display = "block";
+				self.setViewOptions(overlay);
+			}
+
+			// add animation defined in event target style declaration
+			if (animation && self.supportAnimations) {
+				self.fadeIn(overlay, false, animation);
+			}
+		}
+		else if (id) {
+			if (overlay==null || overlay==false) {
+				self.log("Overlay not found, '"+ id + "'");
+				return;
+			}
+
+			display = window.getComputedStyle(overlay).getPropertyValue("display");
+
+			if (display=="" || display=="none") {
+				overlay.style.display = "block";
+			}
+
+			// add animation defined in event target style declaration
+			if (animation && self.supportAnimations) {
+				self.fadeIn(overlay, false, animation);
+			}
+		}
+
+		// do not set x or y position if centering
+		centerHorizontally = self.getViewPreferenceBoolean(overlay, self.prefix + "center-horizontally", false);
+		centerVertically = self.getViewPreferenceBoolean(overlay, self.prefix + "center-vertically", false);
+
+		if (overlay && centerHorizontally==false) {
+			overlay.style.left = x + "px";
+		}
+		
+		if (overlay && centerVertically==false) {
+			overlay.style.top = y + "px";
+		}
+
+		self.currentOverlay = overlay;
+	}
+
+	self.goBack = function() {
+		if (self.currentOverlay) {
+			self.removeOverlay();
+		}
+		else if (self.lastView) {
+			self.goToView(self.lastView.id);
+		}
+	}
+
+	self.removeOverlay = function(animate) {
+		var overlay = self.currentOverlay;
+		animate = animate===false ? false : true;
+
+		if (overlay) {
+			var style = overlay.style;
+			
+			if (style.animation && self.supportAnimations && animate) {
+				self.reverseAnimation(overlay, true);
+
+				var duration = self.getAnimationDuration(style.animation, true);
+		
+				setTimeout(function() {
+					self.setElementAnimation(overlay, null);
+					self.hideOverlay(overlay);
+				}, duration);
+			}
+			else {
+				self.setElementAnimation(overlay, null);
+				self.hideOverlay(overlay);
+			}
+		}
+	}
+
+	/**
+	 * Reverse the animation and hide after
+	 * @param {Object} target element with animation
+	 * @param {Boolean} hide hide after animation ends
+	 */
+	self.reverseAnimation = function(target, hide) {
+		var lastAnimation = null;
+		var style = target.style;
+
+		style.animationPlayState = "paused";
+		lastAnimation = style.animation;
+		style.animation = null;
+		style.animationPlayState = "paused";
+
+		if (hide) {
+			//target.addEventListener("animationend", self.animationEndHideHandler);
+	
+			var duration = self.getAnimationDuration(lastAnimation, true);
+			var isOverlay = self.isOverlay(target);
+	
+			setTimeout(function() {
+				self.setElementAnimation(target, null);
+
+				if (isOverlay) {
+					self.hideOverlay(target);
+				}
+				else {
+					self.hideView(target);
+				}
+			}, duration);
+		}
+
+		setTimeout(function() {
+			style.animation = lastAnimation;
+			style.animationPlayState = "paused";
+			style.animationDirection = "reverse";
+			style.animationPlayState = "running";
+		}, 30);
+	}
+
+	self.animationEndHandler = function(event) {
+		var target = event.currentTarget;
+		self.dispatchEvent(new Event(event.type));
+	}
+
+	self.isOverlay = function(view) {
+		var result = view ? self.getViewPreferenceBoolean(view, self.prefix + "is-overlay") : false;
+
+		return result;
+	}
+
+	self.animationEndHideHandler = function(event) {
+		var target = event.currentTarget;
+		self.setViewVariables(null, target);
+		self.hideView(target);
+		target.removeEventListener("animationend", self.animationEndHideHandler);
+	}
+
+	self.animationEndShowHandler = function(event) {
+		var target = event.currentTarget;
+		target.removeEventListener("animationend", self.animationEndShowHandler);
+	}
+
+	self.setViewOptions = function(view) {
+
+		if (view) {
+			self.minimumScale = self.getViewPreferenceValue(view, self.prefix + "minimum-scale");
+			self.maximumScale = self.getViewPreferenceValue(view, self.prefix + "maximum-scale");
+			self.scaleViewsToFit = self.getViewPreferenceBoolean(view, self.prefix + "scale-to-fit");
+			self.scaleToFitType = self.getViewPreferenceValue(view, self.prefix + "scale-to-fit-type");
+			self.scaleToFitOnDoubleClick = self.getViewPreferenceBoolean(view, self.prefix + "scale-on-double-click");
+			self.actualSizeOnDoubleClick = self.getViewPreferenceBoolean(view, self.prefix + "actual-size-on-double-click");
+			self.scaleViewsOnResize = self.getViewPreferenceBoolean(view, self.prefix + "scale-on-resize");
+			self.enableScaleUp = self.getViewPreferenceBoolean(view, self.prefix + "enable-scale-up");
+			self.centerHorizontally = self.getViewPreferenceBoolean(view, self.prefix + "center-horizontally");
+			self.centerVertically = self.getViewPreferenceBoolean(view, self.prefix + "center-vertically");
+			self.navigationOnKeypress = self.getViewPreferenceBoolean(view, self.prefix + "navigate-on-keypress");
+			self.showViewName = self.getViewPreferenceBoolean(view, self.prefix + "show-view-name");
+			self.refreshPageForChanges = self.getViewPreferenceBoolean(view, self.prefix + "refresh-for-changes");
+			self.refreshPageForChangesInterval = self.getViewPreferenceValue(view, self.prefix + "refresh-interval");
+			self.showNavigationControls = self.getViewPreferenceBoolean(view, self.prefix + "show-navigation-controls");
+			self.scaleViewSlider = self.getViewPreferenceBoolean(view, self.prefix + "show-scale-controls");
+			self.enableDeepLinking = self.getViewPreferenceBoolean(view, self.prefix + "enable-deep-linking");
+			self.singlePageApplication = self.getViewPreferenceBoolean(view, self.prefix + "application");
+			self.showByMediaQuery = self.getViewPreferenceBoolean(view, self.prefix + "show-by-media-query");
+			self.showUpdateNotification = document.cookie!="" ? document.cookie.indexOf(self.pageRefreshedName)!=-1 : false;
+			self.imageComparisonDuration = self.getViewPreferenceValue(view, self.prefix + "image-comparison-duration");
+			self.supportAnimations = self.getViewPreferenceBoolean(view, self.prefix + "enable-animations", true);
+
+			if (self.scaleViewsToFit) {
+				var newScaleValue = self.scaleViewToFit(view);
+				
+				if (newScaleValue<0) {
+					setTimeout(self.scaleViewToFit, 500, view);
+				}
+			}
+			else {
+				self.viewScale = self.getViewScaleValue(view);
+				self.viewToFitWidthScale = self.getViewFitToViewportWidthScale(view, self.enableScaleUp)
+				self.viewToFitHeightScale = self.getViewFitToViewportScale(view, self.enableScaleUp);
+				self.updateSliderValue(self.viewScale);
+			}
+
+			if (self.imageComparisonDuration!=null) {
+				// todo
+			}
+
+			if (self.refreshPageForChangesInterval!=null) {
+				self.refreshDuration = Number(self.refreshPageForChangesInterval);
+			}
+		}
+	}
+
+	self.previousView = function(event) {
+		var rules = self.getStylesheetRules();
+		var view = self.getVisibleView()
+		var index = view ? self.getViewIndex(view) : -1;
+		var prevQueryIndex = index!=-1 ? index-1 : self.currentQuery.index-1;
+		var queryIndex = 0;
+		var numberOfRules = rules!=null ? rules.length : 0;
+
+		if (event) {
+			event.stopImmediatePropagation();
+		}
+
+		if (prevQueryIndex<0) {
+			return;
+		}
+
+		// loop through rules and hide media queries except selected
+		for (var i=0;i<numberOfRules;i++) {
+			var rule = rules[i];
+			
+			if (rule.media!=null) {
+
+				if (queryIndex==prevQueryIndex) {
+					self.currentQuery.mediaText = rule.conditionText;
+					self.currentQuery.index = prevQueryIndex;
+					self.currentQuery.rule = rule;
+					self.enableMediaQuery(rule);
+					self.updateViewLabel();
+					self.updateURL();
+					self.dispatchViewChange();
+				}
+				else {
+					self.disableMediaQuery(rule);
+				}
+
+				queryIndex++;
+			}
+		}
+	}
+
+	self.nextView = function(event) {
+		var rules = self.getStylesheetRules();
+		var view = self.getVisibleView();
+		var index = view ? self.getViewIndex(view) : -1;
+		var nextQueryIndex = index!=-1 ? index+1 : self.currentQuery.index+1;
+		var queryIndex = 0;
+		var numberOfRules = rules!=null ? rules.length : 0;
+		var numberOfMediaQueries = self.getNumberOfMediaRules();
+
+		if (event) {
+			event.stopImmediatePropagation();
+		}
+
+		if (nextQueryIndex>=numberOfMediaQueries) {
+			return;
+		}
+
+		// loop through rules and hide media queries except selected
+		for (var i=0;i<numberOfRules;i++) {
+			var rule = rules[i];
+			
+			if (rule.media!=null) {
+
+				if (queryIndex==nextQueryIndex) {
+					self.currentQuery.mediaText = rule.conditionText;
+					self.currentQuery.index = nextQueryIndex;
+					self.currentQuery.rule = rule;
+					self.enableMediaQuery(rule);
+					self.updateViewLabel();
+					self.updateURL();
+					self.dispatchViewChange();
+				}
+				else {
+					self.disableMediaQuery(rule);
+				}
+
+				queryIndex++;
+			}
+		}
+	}
+
+	/**
+	 * Enables a view via media query
+	 */
+	self.enableMediaQuery = function(rule) {
+
+		try {
+			rule.media.mediaText = self.inclusionQuery;
+		}
+		catch(error) {
+			//self.log(error);
+			rule.conditionText = self.inclusionQuery;
+		}
+	}
+
+	self.disableMediaQuery = function(rule) {
+
+		try {
+			rule.media.mediaText = self.exclusionQuery;
+		}
+		catch(error) {
+			rule.conditionText = self.exclusionQuery;
+		}
+	}
+
+	self.dispatchViewChange = function() {
+		try {
+			var event = new Event(self.NAVIGATION_CHANGE);
+			window.dispatchEvent(event);
+		}
+		catch (error) {
+			// In IE 11: Object doesn't support this action
+		}
+	}
+
+	self.getNumberOfMediaRules = function() {
+		var rules = self.getStylesheetRules();
+		var numberOfRules = rules ? rules.length : 0;
+		var numberOfQueries = 0;
+
+		for (var i=0;i<numberOfRules;i++) {
+			if (rules[i].media!=null) { numberOfQueries++; }
+		}
+		
+		return numberOfQueries;
+	}
+
+	/////////////////////////////////////////
+	// VIEW SCALE 
+	/////////////////////////////////////////
+
+	self.sliderChangeHandler = function(event) {
+		var value = self.getShortNumber(event.currentTarget.value/100);
+		var view = self.getVisibleView();
+		self.setViewScaleValue(view, false, value, true);
+	}
+
+	self.updateSliderValue = function(scale) {
+		var slider = document.getElementById(self.viewScaleSliderId);
+		var tooltip = parseInt(scale * 100 + "") + "%";
+		var inputType;
+		var inputValue;
+		
+		if (slider) {
+			inputValue = self.getShortNumber(scale * 100);
+			if (inputValue!=slider["value"]) {
+				slider["value"] = inputValue;
+			}
+			inputType = slider.getAttributeNS(null, "type");
+
+			if (inputType!="range") {
+				// input range is not supported
+				slider.style.display = "none";
+			}
+
+			self.setTooltip(slider, tooltip);
+		}
+	}
+
+	self.viewChangeHandler = function(event) {
+		var view = self.getVisibleView();
+		var matrix = view ? getComputedStyle(view).transform : null;
+		
+		if (matrix) {
+			self.viewScale = self.getViewScaleValue(view);
+			
+			var scaleNeededToFit = self.getViewFitToViewportScale(view);
+			var isViewLargerThanViewport = scaleNeededToFit<1;
+			
+			// scale large view to fit if scale to fit is enabled
+			if (self.scaleViewsToFit) {
+				self.scaleViewToFit(view);
+			}
+			else {
+				self.updateSliderValue(self.viewScale);
+			}
+		}
+	}
+
+	self.getViewScaleValue = function(view) {
+		var matrix = getComputedStyle(view).transform;
+
+		if (matrix) {
+			var matrixArray = matrix.replace("matrix(", "").split(",");
+			var scaleX = parseFloat(matrixArray[0]);
+			var scaleY = parseFloat(matrixArray[3]);
+			var scale = Math.min(scaleX, scaleY);
+		}
+
+		return scale;
+	}
+
+	/**
+	 * Scales view to scale. 
+	 * @param {Object} view view to scale. views are in views array
+	 * @param {Boolean} scaleToFit set to true to scale to fit. set false to use desired scale value
+	 * @param {Number} desiredScale scale to define. not used if scale to fit is false
+	 * @param {Boolean} isSliderChange indicates if slider is callee
+	 */
+	self.setViewScaleValue = function(view, scaleToFit, desiredScale, isSliderChange) {
+		var enableScaleUp = self.enableScaleUp;
+		var scaleToFitType = self.scaleToFitType;
+		var minimumScale = self.minimumScale;
+		var maximumScale = self.maximumScale;
+		var hasMinimumScale = !isNaN(minimumScale) && minimumScale!="";
+		var hasMaximumScale = !isNaN(maximumScale) && maximumScale!="";
+		var scaleNeededToFit = self.getViewFitToViewportScale(view, enableScaleUp);
+		var scaleNeededToFitWidth = self.getViewFitToViewportWidthScale(view, enableScaleUp);
+		var scaleNeededToFitHeight = self.getViewFitToViewportHeightScale(view, enableScaleUp);
+		var scaleToFitFull = self.getViewFitToViewportScale(view, true);
+		var scaleToFitFullWidth = self.getViewFitToViewportWidthScale(view, true);
+		var scaleToFitFullHeight = self.getViewFitToViewportHeightScale(view, true);
+		var scaleToWidth = scaleToFitType=="width";
+		var scaleToHeight = scaleToFitType=="height";
+		var shrunkToFit = false;
+		var topPosition = null;
+		var leftPosition = null;
+		var translateY = null;
+		var translateX = null;
+		var transformValue = "";
+		var canCenterVertically = true;
+		var canCenterHorizontally = true;
+
+		if (scaleToFit && isSliderChange!=true) {
+			if (scaleToFitType=="fit" || scaleToFitType=="") {
+				desiredScale = scaleNeededToFit;
+			}
+			else if (scaleToFitType=="width") {
+				desiredScale = scaleNeededToFitWidth;
+			}
+			else if (scaleToFitType=="height") {
+				desiredScale = scaleNeededToFitHeight;
+			}
+		}
+		else {
+			if (isNaN(desiredScale)) {
+				desiredScale = 1;
+			}
+		}
+
+		self.updateSliderValue(desiredScale);
+		
+		// scale to fit width
+		if (scaleToWidth && scaleToHeight==false) {
+			canCenterVertically = scaleNeededToFitHeight>=scaleNeededToFitWidth;
+			canCenterHorizontally = scaleNeededToFitWidth>=1 && enableScaleUp==false;
+
+			if (isSliderChange) {
+				canCenterHorizontally = desiredScale<scaleToFitFullWidth;
+			}
+			else if (scaleToFit) {
+				desiredScale = scaleNeededToFitWidth;
+			}
+
+			if (hasMinimumScale) {
+				desiredScale = Math.max(desiredScale, Number(minimumScale));
+			}
+
+			if (hasMaximumScale) {
+				desiredScale = Math.min(desiredScale, Number(maximumScale));
+			}
+
+			desiredScale = self.getShortNumber(desiredScale);
+
+			canCenterHorizontally = self.canCenterHorizontally(view, "width", enableScaleUp, desiredScale, minimumScale, maximumScale);
+			canCenterVertically = self.canCenterVertically(view, "width", enableScaleUp, desiredScale, minimumScale, maximumScale);
+
+			if (desiredScale>1 && (enableScaleUp || isSliderChange)) {
+				transformValue = "scale(" + desiredScale + ")";
+			}
+			else if (desiredScale>=1 && enableScaleUp==false) {
+				transformValue = "scale(" + 1 + ")";
+			}
+			else {
+				transformValue = "scale(" + desiredScale + ")";
+			}
+
+			if (self.centerVertically) {
+				if (canCenterVertically) {
+					translateY = "-50%";
+					topPosition = "50%";
+				}
+				else {
+					translateY = "0";
+					topPosition = "0";
+				}
+				
+				if (view.style.top != topPosition) {
+					view.style.top = topPosition + "";
+				}
+
+				if (canCenterVertically) {
+					transformValue += " translateY(" + translateY+ ")";
+				}
+			}
+
+			if (self.centerHorizontally) {
+				if (canCenterHorizontally) {
+					translateX = "-50%";
+					leftPosition = "50%";
+				}
+				else {
+					translateX = "0";
+					leftPosition = "0";
+				}
+
+				if (view.style.left != leftPosition) {
+					view.style.left = leftPosition + "";
+				}
+
+				if (canCenterHorizontally) {
+					transformValue += " translateX(" + translateX+ ")";
+				}
+			}
+
+			view.style.transformOrigin = "0 0";
+			view.style.transform = transformValue;
+
+			self.viewScale = desiredScale;
+			self.viewToFitWidthScale = scaleNeededToFitWidth;
+			self.viewToFitHeightScale = scaleNeededToFitHeight;
+			self.viewLeft = leftPosition;
+			self.viewTop = topPosition;
+
+			return desiredScale;
+		}
+
+		// scale to fit height
+		if (scaleToHeight && scaleToWidth==false) {
+			//canCenterVertically = scaleNeededToFitHeight>=scaleNeededToFitWidth;
+			//canCenterHorizontally = scaleNeededToFitHeight<=scaleNeededToFitWidth && enableScaleUp==false;
+			canCenterVertically = scaleNeededToFitHeight>=scaleNeededToFitWidth;
+			canCenterHorizontally = scaleNeededToFitWidth>=1 && enableScaleUp==false;
+			
+			if (isSliderChange) {
+				canCenterHorizontally = desiredScale<scaleToFitFullHeight;
+			}
+			else if (scaleToFit) {
+				desiredScale = scaleNeededToFitHeight;
+			}
+
+			if (hasMinimumScale) {
+				desiredScale = Math.max(desiredScale, Number(minimumScale));
+			}
+
+			if (hasMaximumScale) {
+				desiredScale = Math.min(desiredScale, Number(maximumScale));
+				//canCenterVertically = desiredScale>=scaleNeededToFitHeight && enableScaleUp==false;
+			}
+
+			desiredScale = self.getShortNumber(desiredScale);
+
+			canCenterHorizontally = self.canCenterHorizontally(view, "height", enableScaleUp, desiredScale, minimumScale, maximumScale);
+			canCenterVertically = self.canCenterVertically(view, "height", enableScaleUp, desiredScale, minimumScale, maximumScale);
+
+			if (desiredScale>1 && (enableScaleUp || isSliderChange)) {
+				transformValue = "scale(" + desiredScale + ")";
+			}
+			else if (desiredScale>=1 && enableScaleUp==false) {
+				transformValue = "scale(" + 1 + ")";
+			}
+			else {
+				transformValue = "scale(" + desiredScale + ")";
+			}
+
+			if (self.centerHorizontally) {
+				if (canCenterHorizontally) {
+					translateX = "-50%";
+					leftPosition = "50%";
+				}
+				else {
+					translateX = "0";
+					leftPosition = "0";
+				}
+
+				if (view.style.left != leftPosition) {
+					view.style.left = leftPosition + "";
+				}
+
+				if (canCenterHorizontally) {
+					transformValue += " translateX(" + translateX+ ")";
+				}
+			}
+
+			if (self.centerVertically) {
+				if (canCenterVertically) {
+					translateY = "-50%";
+					topPosition = "50%";
+				}
+				else {
+					translateY = "0";
+					topPosition = "0";
+				}
+				
+				if (view.style.top != topPosition) {
+					view.style.top = topPosition + "";
+				}
+
+				if (canCenterVertically) {
+					transformValue += " translateY(" + translateY+ ")";
+				}
+			}
+
+			view.style.transformOrigin = "0 0";
+			view.style.transform = transformValue;
+
+			self.viewScale = desiredScale;
+			self.viewToFitWidthScale = scaleNeededToFitWidth;
+			self.viewToFitHeightScale = scaleNeededToFitHeight;
+			self.viewLeft = leftPosition;
+			self.viewTop = topPosition;
+
+			return scaleNeededToFitHeight;
+		}
+
+		if (scaleToFitType=="fit") {
+			//canCenterVertically = scaleNeededToFitHeight>=scaleNeededToFitWidth;
+			//canCenterHorizontally = scaleNeededToFitWidth>=scaleNeededToFitHeight;
+			canCenterVertically = scaleNeededToFitHeight>=scaleNeededToFit;
+			canCenterHorizontally = scaleNeededToFitWidth>=scaleNeededToFit;
+
+			if (hasMinimumScale) {
+				desiredScale = Math.max(desiredScale, Number(minimumScale));
+			}
+
+			desiredScale = self.getShortNumber(desiredScale);
+
+			if (isSliderChange || scaleToFit==false) {
+				canCenterVertically = scaleToFitFullHeight>=desiredScale;
+				canCenterHorizontally = desiredScale<scaleToFitFullWidth;
+			}
+			else if (scaleToFit) {
+				desiredScale = scaleNeededToFit;
+			}
+
+			transformValue = "scale(" + desiredScale + ")";
+
+			//canCenterHorizontally = self.canCenterHorizontally(view, "fit", false, desiredScale);
+			//canCenterVertically = self.canCenterVertically(view, "fit", false, desiredScale);
+			
+			if (self.centerVertically) {
+				if (canCenterVertically) {
+					translateY = "-50%";
+					topPosition = "50%";
+				}
+				else {
+					translateY = "0";
+					topPosition = "0";
+				}
+				
+				if (view.style.top != topPosition) {
+					view.style.top = topPosition + "";
+				}
+
+				if (canCenterVertically) {
+					transformValue += " translateY(" + translateY+ ")";
+				}
+			}
+
+			if (self.centerHorizontally) {
+				if (canCenterHorizontally) {
+					translateX = "-50%";
+					leftPosition = "50%";
+				}
+				else {
+					translateX = "0";
+					leftPosition = "0";
+				}
+
+				if (view.style.left != leftPosition) {
+					view.style.left = leftPosition + "";
+				}
+
+				if (canCenterHorizontally) {
+					transformValue += " translateX(" + translateX+ ")";
+				}
+			}
+
+			view.style.transformOrigin = "0 0";
+			view.style.transform = transformValue;
+
+			self.viewScale = desiredScale;
+			self.viewToFitWidthScale = scaleNeededToFitWidth;
+			self.viewToFitHeightScale = scaleNeededToFitHeight;
+			self.viewLeft = leftPosition;
+			self.viewTop = topPosition;
+
+			self.updateSliderValue(desiredScale);
+			
+			return desiredScale;
+		}
+
+		if (scaleToFitType=="default" || scaleToFitType=="") {
+			desiredScale = 1;
+
+			if (hasMinimumScale) {
+				desiredScale = Math.max(desiredScale, Number(minimumScale));
+			}
+			if (hasMaximumScale) {
+				desiredScale = Math.min(desiredScale, Number(maximumScale));
+			}
+
+			canCenterHorizontally = self.canCenterHorizontally(view, "none", false, desiredScale, minimumScale, maximumScale);
+			canCenterVertically = self.canCenterVertically(view, "none", false, desiredScale, minimumScale, maximumScale);
+
+			if (self.centerVertically) {
+				if (canCenterVertically) {
+					translateY = "-50%";
+					topPosition = "50%";
+				}
+				else {
+					translateY = "0";
+					topPosition = "0";
+				}
+				
+				if (view.style.top != topPosition) {
+					view.style.top = topPosition + "";
+				}
+
+				if (canCenterVertically) {
+					transformValue += " translateY(" + translateY+ ")";
+				}
+			}
+
+			if (self.centerHorizontally) {
+				if (canCenterHorizontally) {
+					translateX = "-50%";
+					leftPosition = "50%";
+				}
+				else {
+					translateX = "0";
+					leftPosition = "0";
+				}
+
+				if (view.style.left != leftPosition) {
+					view.style.left = leftPosition + "";
+				}
+
+				if (canCenterHorizontally) {
+					transformValue += " translateX(" + translateX+ ")";
+				}
+				else {
+					transformValue += " translateX(" + 0 + ")";
+				}
+			}
+
+			view.style.transformOrigin = "0 0";
+			view.style.transform = transformValue;
+
+
+			self.viewScale = desiredScale;
+			self.viewToFitWidthScale = scaleNeededToFitWidth;
+			self.viewToFitHeightScale = scaleNeededToFitHeight;
+			self.viewLeft = leftPosition;
+			self.viewTop = topPosition;
+
+			self.updateSliderValue(desiredScale);
+			
+			return desiredScale;
+		}
+	}
+
+	/**
+	 * Returns true if view can be centered horizontally
+	 * @param {HTMLElement} view view
+	 * @param {String} type type of scaling - width, height, all, none
+	 * @param {Boolean} scaleUp if scale up enabled 
+	 * @param {Number} scale target scale value 
+	 */
+	self.canCenterHorizontally = function(view, type, scaleUp, scale, minimumScale, maximumScale) {
+		var scaleNeededToFit = self.getViewFitToViewportScale(view, scaleUp);
+		var scaleNeededToFitHeight = self.getViewFitToViewportHeightScale(view, scaleUp);
+		var scaleNeededToFitWidth = self.getViewFitToViewportWidthScale(view, scaleUp);
+		var canCenter = false;
+		var minScale;
+
+		type = type==null ? "none" : type;
+		scale = scale==null ? scale : scaleNeededToFitWidth;
+		scaleUp = scaleUp == null ? false : scaleUp;
+
+		if (type=="width") {
+	
+			if (scaleUp && maximumScale==null) {
+				canCenter = false;
+			}
+			else if (scaleNeededToFitWidth>=1) {
+				canCenter = true;
+			}
+		}
+		else if (type=="height") {
+			minScale = Math.min(1, scaleNeededToFitHeight);
+			if (minimumScale!="" && maximumScale!="") {
+				minScale = Math.max(minimumScale, Math.min(maximumScale, scaleNeededToFitHeight));
+			}
+			else {
+				if (minimumScale!="") {
+					minScale = Math.max(minimumScale, scaleNeededToFitHeight);
+				}
+				if (maximumScale!="") {
+					minScale = Math.max(minimumScale, Math.min(maximumScale, scaleNeededToFitHeight));
+				}
+			}
+	
+			if (scaleUp && maximumScale=="") {
+				canCenter = false;
+			}
+			else if (scaleNeededToFitWidth>=minScale) {
+				canCenter = true;
+			}
+		}
+		else if (type=="fit") {
+			canCenter = scaleNeededToFitWidth>=scaleNeededToFit;
+		}
+		else {
+			if (scaleUp) {
+				canCenter = false;
+			}
+			else if (scaleNeededToFitWidth>=1) {
+				canCenter = true;
+			}
+		}
+
+		self.horizontalScrollbarsNeeded = canCenter;
+		
+		return canCenter;
+	}
+
+	/**
+	 * Returns true if view can be centered horizontally
+	 * @param {HTMLElement} view view to scale
+	 * @param {String} type type of scaling
+	 * @param {Boolean} scaleUp if scale up enabled 
+	 * @param {Number} scale target scale value 
+	 */
+	self.canCenterVertically = function(view, type, scaleUp, scale, minimumScale, maximumScale) {
+		var scaleNeededToFit = self.getViewFitToViewportScale(view, scaleUp);
+		var scaleNeededToFitWidth = self.getViewFitToViewportWidthScale(view, scaleUp);
+		var scaleNeededToFitHeight = self.getViewFitToViewportHeightScale(view, scaleUp);
+		var canCenter = false;
+		var minScale;
+
+		type = type==null ? "none" : type;
+		scale = scale==null ? 1 : scale;
+		scaleUp = scaleUp == null ? false : scaleUp;
+	
+		if (type=="width") {
+			canCenter = scaleNeededToFitHeight>=scaleNeededToFitWidth;
+		}
+		else if (type=="height") {
+			minScale = Math.max(minimumScale, Math.min(maximumScale, scaleNeededToFit));
+			canCenter = scaleNeededToFitHeight>=minScale;
+		}
+		else if (type=="fit") {
+			canCenter = scaleNeededToFitHeight>=scaleNeededToFit;
+		}
+		else {
+			if (scaleUp) {
+				canCenter = false;
+			}
+			else if (scaleNeededToFitHeight>=1) {
+				canCenter = true;
+			}
+		}
+
+		self.verticalScrollbarsNeeded = canCenter;
+		
+		return canCenter;
+	}
+
+	self.getViewFitToViewportScale = function(view, scaleUp) {
+		var enableScaleUp = scaleUp;
+		var availableWidth = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
+		var availableHeight = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight;
+		var elementWidth = parseFloat(getComputedStyle(view, "style").width);
+		var elementHeight = parseFloat(getComputedStyle(view, "style").height);
+		var newScale = 1;
+
+		// if element is not added to the document computed values are NaN
+		if (isNaN(elementWidth) || isNaN(elementHeight)) {
+			return newScale;
+		}
+
+		availableWidth -= self.horizontalPadding;
+		availableHeight -= self.verticalPadding;
+
+		if (enableScaleUp) {
+			newScale = Math.min(availableHeight/elementHeight, availableWidth/elementWidth);
+		}
+		else if (elementWidth > availableWidth || elementHeight > availableHeight) {
+			newScale = Math.min(availableHeight/elementHeight, availableWidth/elementWidth);
+		}
+		
+		return newScale;
+	}
+
+	self.getViewFitToViewportWidthScale = function(view, scaleUp) {
+		// need to get browser viewport width when element
+		var isParentWindow = view && view.parentNode && view.parentNode===document.body;
+		var enableScaleUp = scaleUp;
+		var availableWidth = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
+		var elementWidth = parseFloat(getComputedStyle(view, "style").width);
+		var newScale = 1;
+
+		// if element is not added to the document computed values are NaN
+		if (isNaN(elementWidth)) {
+			return newScale;
+		}
+
+		availableWidth -= self.horizontalPadding;
+
+		if (enableScaleUp) {
+			newScale = availableWidth/elementWidth;
+		}
+		else if (elementWidth > availableWidth) {
+			newScale = availableWidth/elementWidth;
+		}
+		
+		return newScale;
+	}
+
+	self.getViewFitToViewportHeightScale = function(view, scaleUp) {
+		var enableScaleUp = scaleUp;
+		var availableHeight = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight;
+		var elementHeight = parseFloat(getComputedStyle(view, "style").height);
+		var newScale = 1;
+
+		// if element is not added to the document computed values are NaN
+		if (isNaN(elementHeight)) {
+			return newScale;
+		}
+
+		availableHeight -= self.verticalPadding;
+
+		if (enableScaleUp) {
+			newScale = availableHeight/elementHeight;
+		}
+		else if (elementHeight > availableHeight) {
+			newScale = availableHeight/elementHeight;
+		}
+		
+		return newScale;
+	}
+
+	self.keypressHandler = function(event) {
+		var rightKey = 39;
+		var leftKey = 37;
+		
+		// listen for both events 
+		if (event.type=="keypress") {
+			window.removeEventListener("keyup", self.keypressHandler);
+		}
+		else {
+			window.removeEventListener("keypress", self.keypressHandler);
+		}
+		
+		if (self.showNavigationControls) {
+			if (self.navigationOnKeypress) {
+				if (event.keyCode==rightKey) {
+					self.nextView();
+				}
+				if (event.keyCode==leftKey) {
+					self.previousView();
+				}
+			}
+		}
+		else if (self.navigationOnKeypress) {
+			if (event.keyCode==rightKey) {
+				self.nextView();
+			}
+			if (event.keyCode==leftKey) {
+				self.previousView();
+			}
+		}
+	}
+
+	///////////////////////////////////
+	// GENERAL FUNCTIONS
+	///////////////////////////////////
+
+	self.getViewById = function(id) {
+		id = id ? id.replace("#", "") : "";
+		var view = self.viewIds.indexOf(id)!=-1 && self.getElement(id);
+		return view;
+	}
+
+	self.getViewIds = function() {
+		var viewIds = self.getViewPreferenceValue(document.body, self.prefix + "view-ids");
+		var viewId = null;
+
+		viewIds = viewIds!=null && viewIds!="" ? viewIds.split(",") : [];
+
+		if (viewIds.length==0) {
+			viewId = self.getViewPreferenceValue(document.body, self.prefix + "view-id");
+			viewIds = viewId ? [viewId] : [];
+		}
+
+		return viewIds;
+	}
+
+	self.getInitialViewId = function() {
+		var viewId = self.getViewPreferenceValue(document.body, self.prefix + "view-id");
+		return viewId;
+	}
+
+	self.getApplicationStylesheet = function() {
+		var stylesheetId = self.getViewPreferenceValue(document.body, self.prefix + "stylesheet-id");
+		self.applicationStylesheet = document.getElementById("applicationStylesheet");
+		return self.applicationStylesheet.sheet;
+	}
+
+	self.getVisibleView = function() {
+		var viewIds = self.getViewIds();
+		
+		for (var i=0;i<viewIds.length;i++) {
+			var viewId = viewIds[i].replace(/[\#?\.?](.*)/, "$" + "1");
+			var view = self.getElement(viewId);
+			var postName = "_Class";
+
+			if (view==null && viewId && viewId.lastIndexOf(postName)!=-1) {
+				view = self.getElement(viewId.replace(postName, ""));
+			}
+			
+			if (view) {
+				var display = getComputedStyle(view).display;
+		
+				if (display=="block" || display=="flex") {
+					return view;
+				}
+			}
+		}
+
+		return null;
+	}
+
+	self.getInitialView = function() {
+		var viewId = self.getInitialViewId();
+		viewId = viewId.replace(/[\#?\.?](.*)/, "$" + "1");
+		var view = self.getElement(viewId);
+		var postName = "_Class";
+
+		if (view==null && viewId && viewId.lastIndexOf(postName)!=-1) {
+			view = self.getElement(viewId.replace(postName, ""));
+		}
+
+		return view;
+	}
+
+	self.getViewIndex = function(view) {
+		var viewIds = self.getViewIds();
+		var id = view ? view.id : null;
+		var index = id && viewIds ? viewIds.indexOf(id) : -1;
+
+		return index;
+	}
+
+	self.syncronizeViewToURL = function() {
+		var fragment = window.location.hash;
+		var view = self.getViewById(fragment);
+		var index = view ? self.getViewIndex(view) : 0;
+		if (index==-1) index = 0;
+		var currentView = self.hideViews(index);
+
+		if (self.supportsPopState && currentView) {
+
+			if (fragment==null) {
+				window.history.replaceState({name:currentView.id}, null, "#"+ currentView.id);
+			}
+			else {
+				window.history.pushState({name:currentView.id}, null, "#"+ currentView.id);
+			}
+		}
+		
+		self.setViewVariables(view);
+		return view;
+	}
+
+	/**
+	 * Set the currentView or currentOverlay properties and set the lastView or lastOverlay properties
+	 */
+	self.setViewVariables = function(view, overlay, parentView) {
+		if (view) {
+			if (self.currentView) {
+				self.lastView = self.currentView;
+			}
+			self.currentView = view;
+		}
+
+		if (overlay) {
+			if (self.currentOverlay) {
+				self.lastOverlay = self.currentOverlay;
+			}
+			self.currentOverlay = overlay;
+		}
+	}
+
+	self.getViewPreferenceBoolean = function(view, property, altValue) {
+		var computedStyle = window.getComputedStyle(view);
+		var value = computedStyle.getPropertyValue(property);
+		var type = typeof value;
+		
+		if (value=="true" || (type=="string" && value.indexOf("true")!=-1)) {
+			return true;
+		}
+		else if (value=="" && arguments.length==3) {
+			return altValue;
+		}
+
+		return false;
+	}
+
+	self.getViewPreferenceValue = function(view, property, defaultValue) {
+		var value = window.getComputedStyle(view).getPropertyValue(property);
+
+		if (value===undefined) {
+			return defaultValue;
+		}
+		
+		value = value.replace(/^[\s\"]*/, "");
+		value = value.replace(/[\s\"]*$/, "");
+		value = value.replace(/^[\s"]*(.*?)[\s"]*$/, function (match, capture) { 
+			return capture;
+		});
+
+		return value;
+	}
+
+	self.getStyleRuleValue = function(cssRule, property) {
+		var value = cssRule ? cssRule.style.getPropertyValue(property) : null;
+
+		if (value===undefined) {
+			return null;
+		}
+		
+		value = value.replace(/^[\s\"]*/, "");
+		value = value.replace(/[\s\"]*$/, "");
+		value = value.replace(/^[\s"]*(.*?)[\s"]*$/, function (match, capture) { 
+			return capture;
+		});
+
+		return value;
+	}
+
+	self.getCSSPropertyValueForElement = function(id, property) {
+		var styleSheets = document.styleSheets;
+		var numOfStylesheets = styleSheets.length;
+		var values = [];
+		var selectorIDText = "#" + id;
+		var selectorClassText = "." + id + "_Class";
+		var value;
+
+		for(var i=0;i<numOfStylesheets;i++) {
+			var styleSheet = styleSheets[i];
+			var cssRules = self.getStylesheetRules(styleSheet);
+			var numOfCSSRules = cssRules.length;
+			var cssRule;
+			
+			for (var j=0;j<numOfCSSRules;j++) {
+				cssRule = cssRules[j];
+				
+				if (cssRule.media) {
+					var mediaRules = cssRule.cssRules;
+					var numOfMediaRules = mediaRules ? mediaRules.length : 0;
+					
+					for(var k=0;k<numOfMediaRules;k++) {
+						var mediaRule = mediaRules[k];
+						
+						if (mediaRule.selectorText==selectorIDText || mediaRule.selectorText==selectorClassText) {
+							
+							if (mediaRule.style && property in mediaRule.style) {
+								value = mediaRule.style.getPropertyValue(property);
+								values.push(value);
+							}
+						}
+					}
+				}
+				else {
+
+					if (cssRule.selectorText==selectorIDText || cssRule.selectorText==selectorClassText) {
+						if (cssRule.style && property in cssRule.style) {
+							value = cssRule.style.getPropertyValue(property);
+							values.push(value);
+						}
+					}
+				}
+			}
+		}
+		
+		return values.pop();
+	}
+
+	self.collectViews = function() {
+		var viewIds = self.getViewIds();
+
+		for (let index = 0; index < viewIds.length; index++) {
+			const id = viewIds[index];
+			const view = self.getViewById(id);
+			//view && view.addEventListener("animationend", self.animationEndHandler);
+			self.views[id] = view;
+		}
+		
+		self.viewIds = viewIds;
+	}
+
+	self.collectOverlays = function() {
+		var viewIds = self.getViewIds();
+		var ids = [];
+
+		for (let index = 0; index < viewIds.length; index++) {
+			const id = viewIds[index];
+			const view = self.getViewById(id);
+			const isOverlay = view && self.isOverlay(view);
+			
+			if (isOverlay) {
+				ids.push(id);
+				self.overlays[id] = view;
+			}
+		}
+		
+		self.overlayIds = ids;
+	}
+
+	self.collectMediaQueries = function() {
+		var viewIds = self.getViewIds();
+		var styleSheet = self.getApplicationStylesheet();
+		var cssRules = self.getStylesheetRules(styleSheet);
+		var numOfCSSRules = cssRules ? cssRules.length : 0;
+		var cssRule;
+		var id = viewIds.length ? viewIds[0]: ""; // single view
+		var selectorIDText = "#" + id;
+		var selectorClassText = "." + id + "_Class";
+		var viewsNotFound = viewIds.slice();
+		var viewsFound = [];
+		var selectorText = null;
+		var property = self.prefix + "view-id";
+		
+		for (var j=0;j<numOfCSSRules;j++) {
+			cssRule = cssRules[j];
+			
+			if (cssRule.media) {
+				var mediaRules = cssRule.cssRules;
+				var numOfMediaRules = mediaRules ? mediaRules.length : 0;
+				
+				for(var k=0;k<numOfMediaRules;k++) {
+					var mediaRule = mediaRules[k];
+					var mediaId = null;
+
+					selectorText = mediaRule.selectorText;
+					
+					if (selectorText==".mediaViewInfo") {
+
+						mediaId = self.getStyleRuleValue(mediaRule, property);
+
+						self.addView(mediaId, cssRule);
+						viewsFound.push(mediaId);
+
+						if (viewsNotFound.indexOf(mediaId)!=-1) {
+							viewsNotFound.splice(viewsNotFound.indexOf(mediaId));
+						}
+
+						break;
+					}
+				}
+			}
+			else {
+				selectorText = cssRule.selectorText.replace(/[#|\s|*]?/g, "");
+
+				if (viewIds.indexOf(selectorText)!=-1) {
+					self.addView(selectorText, cssRule);
+
+					if (viewsNotFound.indexOf(selectorText)!=-1) {
+						viewsNotFound.splice(viewsNotFound.indexOf(selectorText));
+					}
+
+					break;
+				}
+			}
+		}
+
+		if (viewsNotFound.length) {
+			console.log("Could not find the following views:" + viewsNotFound.join(",") + "");
+			console.log("Views found:" + viewsFound.join(",") + "");
+		}
+	}
+
+	/**
+	 * Adds a view. A view object contains the id of the view and the style rule
+	 * Use enableMediaQuery(rule) to enable
+	 * An array of view names are in self.views array
+	 */
+	self.addView = function(name, cssRule, parentId) {
+		var state = {name:name, rule:cssRule, id:name, parentId:parentId};
+		self.addedViews.push(name);
+		self.viewsDictionary[name] = state;
+		self.mediaQueryDictionary[name] = cssRule;
+	}
+
+	self.hasView = function(name) {
+
+		if (self.addedViews.indexOf(name)!=-1) {
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Go to view by id. Views are added in addView()
+	 * @param {String} name id of view in current
+	 * @param {String} parent id of parent view
+	 * @param {Boolean} maintainPreviousState if true then do not hide other views
+	 */
+	self.goToView = function(name, maintainPreviousState, parent) {
+		var state = self.viewsDictionary[name];
+
+		if (state) {
+			if (maintainPreviousState==false || maintainPreviousState==null) {
+				self.hideViews();
+			}
+			self.enableMediaQuery(state.rule);
+			self.updateViewLabel();
+			self.updateURL();
+		}
+		else {
+			var event = new Event(self.STATE_NOT_FOUND);
+			self.stateName = name;
+			window.dispatchEvent(event);
+		}
+	}
+
+	/**
+	 * Go to the view in the event targets CSS variable
+	 */
+	self.goToTargetView = function(event) {
+		var button = event.currentTarget;
+		var buttonComputedStyles = getComputedStyle(button);
+		var actionTargetValue = buttonComputedStyles.getPropertyValue(self.prefix+"action-target").trim();
+		var animation = buttonComputedStyles.getPropertyValue(self.prefix+"animation").trim();
+		var targetType = buttonComputedStyles.getPropertyValue(self.prefix+"action-type").trim();
+		var targetView = self.application ? null : self.getElement(actionTargetValue);
+		var actionTargetStyles = targetView ? targetView.style : null;
+		var state = self.viewsDictionary[actionTargetValue];
+		
+		// navigate to page
+		if (self.application==false || targetType=="page") {
+			document.location.href = "./" + actionTargetValue;
+			return;
+		}
+
+		// if view is found
+		if (targetView) {
+
+			if (self.currentOverlay) {
+				self.removeOverlay(false);
+			}
+
+			// add animation set in event target style declaration
+			if (animation && self.supportAnimations) {
+				self.crossFade(self.currentView, targetView, false, animation);
+			}
+			else {
+				self.setViewVariables(self.currentView);
+				self.hideViews();
+				self.enableMediaQuery(state.rule);
+				self.scaleViewIfNeeded(targetView);
+				self.centerView(targetView);
+				self.updateViewLabel();
+				self.updateURL();
+			}
+		}
+		else {
+			var stateEvent = new Event(self.STATE_NOT_FOUND);
+			self.stateName = name;
+			window.dispatchEvent(stateEvent);
+		}
+
+		event.stopImmediatePropagation();
+	}
+
+	/**
+	 * Cross fade between views
+	 **/
+	self.crossFade = function(from, to, update, animation) {
+		var targetIndex = to.parentNode
+		var fromIndex = Array.prototype.slice.call(from.parentElement.children).indexOf(from);
+		var toIndex = Array.prototype.slice.call(to.parentElement.children).indexOf(to);
+
+		if (from.parentNode==to.parentNode) {
+			var reverse = self.getReverseAnimation(animation);
+			var duration = self.getAnimationDuration(animation, true);
+
+			// if target view is above (higher index)
+			// then fade in target view 
+			// and after fade in then hide previous view instantly
+			if (fromIndex<toIndex) {
+				self.setElementAnimation(from, null);
+				self.setElementAnimation(to, null);
+				self.showViewByMediaQuery(to);
+				self.fadeIn(to, update, animation);
+
+				setTimeout(function() {
+					self.setElementAnimation(to, null);
+					self.setElementAnimation(from, null);
+					self.hideView(from);
+					self.updateURL();
+					self.setViewVariables(to);
+					self.updateViewLabel();
+				}, duration)
+			}
+			// if target view is on bottom
+			// then show target view instantly 
+			// and fade out current view
+			else if (fromIndex>toIndex) {
+				self.setElementAnimation(to, null);
+				self.setElementAnimation(from, null);
+				self.showViewByMediaQuery(to);
+				self.fadeOut(from, update, reverse);
+
+				setTimeout(function() {
+					self.setElementAnimation(to, null);
+					self.setElementAnimation(from, null);
+					self.hideView(from);
+					self.updateURL();
+					self.setViewVariables(to);
+				}, duration)
+			}
+		}
+	}
+
+	self.fadeIn = function(element, update, animation) {
+		self.showViewByMediaQuery(element);
+
+		if (update) {
+			self.updateURL(element);
+
+			element.addEventListener("animationend", function(event) {
+				element.style.animation = null;
+				self.setViewVariables(element);
+				self.updateViewLabel();
+				element.removeEventListener("animationend", arguments.callee);
+			});
+		}
+
+		self.setElementAnimation(element, null);
+		
+		element.style.animation = animation;
+	}
+
+	self.fadeOutCurrentView = function(animation, update) {
+		if (self.currentView) {
+			self.fadeOut(self.currentView, update, animation);
+		}
+		if (self.currentOverlay) {
+			self.fadeOut(self.currentOverlay, update, animation);
+		}
+	}
+
+	self.fadeOut = function(element, update, animation) {
+		if (update) {
+			element.addEventListener("animationend", function(event) {
+				element.style.animation = null;
+				self.hideView(element);
+				element.removeEventListener("animationend", arguments.callee);
+			});
+		}
+
+		element.style.animationPlayState = "paused";
+		element.style.animation = animation;
+		element.style.animationPlayState = "running";
+	}
+
+	self.getReverseAnimation = function(animation) {
+		if (animation && animation.indexOf("reverse")==-1) {
+			animation += " reverse";
+		}
+
+		return animation;
+	}
+
+	/**
+	 * Get duration in animation string
+	 * @param {String} animation animation value
+	 * @param {Boolean} inMilliseconds length in milliseconds if true
+	 */
+	self.getAnimationDuration = function(animation, inMilliseconds) {
+		var duration = 0;
+		var expression = /.+(\d\.\d)s.+/;
+
+		if (animation && animation.match(expression)) {
+			duration = parseFloat(animation.replace(expression, "$" + "1"));
+			if (duration && inMilliseconds) duration = duration * 1000;
+		}
+
+		return duration;
+	}
+
+	self.setElementAnimation = function(element, animation, priority) {
+		element.style.setProperty("animation", animation, "important");
+	}
+
+	self.getElement = function(id) {
+		var elementId = id ? id.trim() : id;
+		var element = elementId ? document.getElementById(elementId) : null;
+
+		return element;
+	}
+
+	self.resizeHandler = function(event) {
+		var view = self.getVisibleView();
+
+		if (self.showByMediaQuery && view) {
+			self.setViewOptions(view);
+			self.setViewVariables(view);
+		}
+		else {
+			self.scaleViewIfNeeded();
+		}
+
+		window.dispatchEvent(new Event(self.APPLICATION_RESIZE));
+	}
+
+	self.scaleViewIfNeeded = function(view) {
+
+		if (self.scaleViewsOnResize) {
+			if (view==null) {
+				view = self.getVisibleView();
+			}
+
+			var isViewScaled = view.getAttributeNS(null, self.SIZE_STATE_NAME)=="false" ? false : true;
+
+			if (isViewScaled) {
+				self.scaleViewToFit(view, true);
+			}
+			else {
+				self.scaleViewToActualSize(view);
+			}
+		}
+		else if (view) {
+			self.centerView(view);
+		}
+	}
+
+	self.centerView = function(view) {
+
+		if (self.scaleToFit) {
+			self.scaleViewToFit(view, true);
+		}
+		else {
+			self.scaleViewToActualSize(view);  // for centering support for now
+		}
+	}
+
+	self.preventDoubleClick = function(event) {
+		event.stopImmediatePropagation();
+	}
+
+	self.hashChangeHandler = function(event) {
+		var fragment = window.location.hash ? window.location.hash.replace("#", "") : "";
+		var view = self.getViewById(fragment);
+
+		if (view) {
+			self.hideViews();
+			self.showView(view);
+			self.setViewVariables(view);
+			self.updateViewLabel();
+			window.dispatchEvent(new Event(self.VIEW_CHANGE));
+		}
+		else {
+			window.dispatchEvent(new Event(self.VIEW_NOT_FOUND));
+		}
+	}
+
+	self.popStateHandler = function(event) {
+		var state = event.state;
+		var fragment = state ? state.name : window.location.hash;
+		var view = self.getViewById(fragment);
+
+		if (view) {
+			self.hideViews();
+			self.showView(view);
+			self.updateViewLabel();
+		}
+		else {
+			window.dispatchEvent(new Event(self.VIEW_NOT_FOUND));
+		}
+	}
+
+	self.doubleClickHandler = function(event) {
+		var view = self.getVisibleView();
+		var scaleValue = view ? self.getViewScaleValue(view) : 1;
+		var scaleNeededToFit = view ? self.getViewFitToViewportScale(view) : 1;
+		var scaleNeededToFitWidth = view ? self.getViewFitToViewportWidthScale(view) : 1;
+		var scaleNeededToFitHeight = view ? self.getViewFitToViewportHeightScale(view) : 1;
+		var scaleToFitType = self.scaleToFitType;
+
+		// Three scenarios
+		// - scale to fit on double click
+		// - set scale to actual size on double click
+		// - switch between scale to fit and actual page size
+
+		if (scaleToFitType=="width") {
+			scaleNeededToFit = scaleNeededToFitWidth;
+		}
+		else if (scaleToFitType=="height") {
+			scaleNeededToFit = scaleNeededToFitHeight;
+		}
+
+		// if scale and actual size enabled then switch between
+		if (self.scaleToFitOnDoubleClick && self.actualSizeOnDoubleClick) {
+			var isViewScaled = view.getAttributeNS(null, self.SIZE_STATE_NAME);
+			var isScaled = false;
+			
+			// if scale is not 1 then view needs scaling
+			if (scaleNeededToFit!=1) {
+
+				// if current scale is at 1 it is at actual size
+				// scale it to fit
+				if (scaleValue==1) {
+					self.scaleViewToFit(view);
+					isScaled = true;
+				}
+				else {
+					// scale is not at 1 so switch to actual size
+					self.scaleViewToActualSize(view);
+					isScaled = false;
+				}
+			}
+			else {
+				// view is smaller than viewport 
+				// so scale to fit() is scale actual size
+				// actual size and scaled size are the same
+				// but call scale to fit to retain centering
+				self.scaleViewToFit(view);
+				isScaled = false;
+			}
+			
+			view.setAttributeNS(null, self.SIZE_STATE_NAME, isScaled+"");
+			isViewScaled = view.getAttributeNS(null, self.SIZE_STATE_NAME);
+		}
+		else if (self.scaleToFitOnDoubleClick) {
+			self.scaleViewToFit(view);
+		}
+		else if (self.actualSizeOnDoubleClick) {
+			self.scaleViewToActualSize(view);
+		}
+
+	}
+
+	self.scaleViewToFit = function(view) {
+		return self.setViewScaleValue(view, true);
+	}
+
+	self.scaleViewToActualSize = function(view) {
+		self.setViewScaleValue(view, false, 1);
+	}
+
+	self.onloadHandler = function(event) {
+		self.initialize();
+	}
+
+	self.getStackArray = function(error) {
+		var value = "";
+		
+		if (error==null) {
+		  try {
+			 error = new Error("Stack");
+		  }
+		  catch (e) {
+			 
+		  }
+		}
+		
+		if ("stack" in error) {
+		  value = error.stack;
+		  var methods = value.split(/\n/g);
+	 
+		  var newArray = methods ? methods.map(function (value, index, array) {
+			 value = value.replace(/\@.*/,"");
+			 return value;
+		  }) : null;
+	 
+		  if (newArray && newArray[0].includes("getStackTrace")) {
+			 newArray.shift();
+		  }
+		  if (newArray && newArray[0].includes("getStackArray")) {
+			 newArray.shift();
+		  }
+		  if (newArray && newArray[0]=="") {
+			 newArray.shift();
+		  }
+	 
+			return newArray;
+		}
+		
+		return null;
+	}
+
+	self.log = function(value) {
+		console.log.apply(this, [value]);
+	}
+	
+	// initialize on load
+	// sometimes the body size is 0 so we call this now and again later
+	window.addEventListener("load", self.onloadHandler);
+	window.document.addEventListener("DOMContentLoaded", self.onloadHandler);
+}
+
+window.application = new Application();
+</script>
+</head>
+<body>
+<div id="Contact_Us___Business">
+	<div id="Background">
+		<svg class="Path_1_z" viewBox="0 337.904 687.82 332.665">
+			<linearGradient id="Path_1_z" spreadMethod="pad" x1="0.001" x2="0.675" y1="0.12" y2="1.259">
+				<stop offset="0" stop-color="#abd5fd" stop-opacity="1"></stop>
+				<stop offset="1" stop-color="#d9eeff" stop-opacity="1"></stop>
+			</linearGradient>
+			<path fill="url(#Path_1_z)" id="Path_1_z" d="M 0 337.9039611816406 C 57.8680419921875 337.9039611816406 195.3383178710938 398.0226440429688 259.488525390625 487.8268737792969 C 323.6413269042969 577.6310424804688 421.4960632324219 591.404541015625 498.6278991699219 580.4270629882812 C 593.8560791015625 566.875244140625 660.9451293945312 601.5084228515625 687.8197021484375 670.56884765625 L 0 670.56884765625 L 0 337.9039611816406 Z">
+			</path>
+		</svg>
+		<svg class="Path_2" viewBox="0 30 745.977 576.301">
+			<path fill="rgba(209,227,241,1)" id="Path_2" d="M 745.97705078125 30.00000190734863 C 745.97705078125 111.8726043701172 644.4026489257812 199.5097198486328 520.679443359375 211.0412445068359 C 396.958740234375 222.5727996826172 336.8635559082031 261.6718139648438 317.6509704589844 355.1300659179688 C 298.4384460449219 448.5883483886719 207.902587890625 606.3011474609375 0 606.3011474609375 L 0 30.00000190734863 L 745.97705078125 30.00000190734863 Z">
+			</path>
+		</svg>
+		<svg class="Path_3_" viewBox="497.611 30.275 646.108 535.28">
+			<linearGradient id="Path_3_" spreadMethod="pad" x1="0.202" x2="1.01" y1="-0.215" y2="0.582">
+				<stop offset="0" stop-color="#abd5fd" stop-opacity="1"></stop>
+				<stop offset="1" stop-color="#d9eeff" stop-opacity="1"></stop>
+			</linearGradient>
+			<path fill="url(#Path_3_)" id="Path_3_" d="M 497.61083984375 30.27496337890625 C 497.61083984375 30.27496337890625 498.9140625 128.7168884277344 583.70263671875 184.3310852050781 C 687.7885131835938 252.6055450439453 831.6303100585938 223.3682403564453 886.8540649414062 238.9918975830078 C 942.0750122070312 254.6154937744141 989.5266723632812 282.7086181640625 1011.071350097656 337.6683349609375 C 1032.61865234375 392.6280212402344 997.7030639648438 540.2239379882812 1143.718505859375 565.5546875 L 1143.718505859375 30.27496337890625 L 497.61083984375 30.27496337890625 Z">
+			</path>
+		</svg>
+	</div>
+	<div id="CONTACT_US">
+		<span>CONTACT US</span>
+	</div>
+	<div onclick="application.goToTargetView(event)" id="Get_Started">
+		<span>GET STARTED</span>
+	</div>
+	<div onclick="application.goToTargetView(event)" id="SERVICE">
+		<span>SERVICE</span>
+	</div>
+	<div onclick="application.goToTargetView(event)" id="Get_Started_">
+		<span>HOME</span>
+	</div>
+	<div id="Logo" class="Logo">
+		<img id="Logo_" src="Logo_.png" srcset="Logo_.png 1x, Logo_@2x.png 2x">
+	</div>
+	<div id="Art">
+		<svg class="Path_323" viewBox="298.876 363.391 887.182 41.856">
+			<path fill="rgba(207,231,252,1)" id="Path_323" d="M 1186.057861328125 374.7548828125 C 1098.09375 368.0076599121094 919.9722900390625 363.3910217285156 714.5447998046875 363.3910217285156 C 580.7877197265625 363.3910217285156 458.6224365234375 365.3495178222656 365.3666381835938 368.5777893066406 C 345.0288391113281 380.6502990722656 322.5829162597656 390.4559020996094 298.8760375976562 397.3037109375 C 395.9504089355469 402.1416320800781 546.0590209960938 405.2470397949219 714.5447998046875 405.2470397949219 C 919.9722900390625 405.2470397949219 1098.09375 400.6325988769531 1186.057861328125 393.8853759765625 L 1186.057861328125 374.7548828125 Z">
+			</path>
+		</svg>
+		<div id="Group_187">
+			<div id="Group_167">
+				<svg class="Path_324_e" viewBox="319.813 201.416 49.36 84.243">
+					<linearGradient id="Path_324_e" spreadMethod="pad" x1="0" x2="1" y1="0.5" y2="0.5">
+						<stop offset="0" stop-color="#071786" stop-opacity="1"></stop>
+						<stop offset="0.1509" stop-color="#05136b" stop-opacity="1"></stop>
+						<stop offset="0.3236" stop-color="#031054" stop-opacity="1"></stop>
+						<stop offset="0.5107" stop-color="#020d44" stop-opacity="1"></stop>
+						<stop offset="0.7204" stop-color="#020c3b" stop-opacity="1"></stop>
+						<stop offset="1" stop-color="#020c38" stop-opacity="1"></stop>
+					</linearGradient>
+					<path fill="url(#Path_324_e)" id="Path_324_e" d="M 348.5072937011719 204.1568450927734 C 344.0113220214844 207.5483093261719 341.7287292480469 213.5890350341797 342.7392883300781 219.1290435791016 C 343.6380004882812 224.0675964355469 346.8752746582031 229.0933380126953 344.9190673828125 233.7144622802734 C 342.9159545898438 238.4495849609375 336.8863525390625 239.5249176025391 331.9500427246094 240.9669036865234 C 328.1539001464844 242.0757904052734 324.3868103027344 243.8866577148438 321.9856872558594 247.0299987792969 C 319.5868835449219 250.1755523681641 318.9273376464844 254.8838653564453 321.2725219726562 258.0697021484375 C 324.0760192871094 261.8792114257812 330.4789733886719 263.1043395996094 331.078125 267.7991943359375 C 331.5811767578125 271.7474060058594 327.2752990722656 274.9823913574219 327.4049072265625 278.9618835449219 C 327.4966430664062 281.7608947753906 329.8753356933594 284.0681457519531 332.5267944335938 284.9757995605469 C 335.1760559082031 285.8834533691406 338.0600891113281 285.6934204101562 340.8546752929688 285.4922180175781 C 344.7111511230469 285.2127685546875 348.650390625 284.9131774902344 352.2028198242188 283.3884582519531 C 355.7553100585938 281.8614807128906 358.9097900390625 278.8545227050781 359.5447082519531 275.0405578613281 C 360.0790405273438 271.812255859375 358.7823181152344 268.6063232421875 357.9865417480469 265.4317016601562 C 357.1927795410156 262.25927734375 357.0474853515625 258.4765319824219 359.3546752929688 256.1559448242188 C 360.8100891113281 254.6916198730469 362.9630737304688 254.1237487792969 364.50341796875 252.748779296875 C 367.8367614746094 249.7754058837891 367.132568359375 244.3986358642578 365.5765075683594 240.2112579345703 C 364.0182800292969 236.0238952636719 361.847412109375 231.5793914794922 363.1419067382812 227.3025817871094 C 364.0294189453125 224.3738708496094 366.4059448242188 222.1449279785156 367.7495727539062 219.3950500488281 C 373.8350219726562 206.9581298828125 359.0863952636719 196.1755676269531 348.5072937011719 204.1568450927734 Z">
+					</path>
+				</svg>
+				<div id="Group_166">
+					<div id="Group_153">
+						<svg class="Path_325_i" viewBox="340.848 270.183 86.542 109.804">
+							<linearGradient id="Path_325_i" spreadMethod="pad" x1="-4.764" x2="-4.764" y1="-0.676" y2="0.558">
+								<stop offset="0" stop-color="#071786" stop-opacity="1"></stop>
+								<stop offset="0.1991" stop-color="#06157d" stop-opacity="1"></stop>
+								<stop offset="0.512" stop-color="#051267" stop-opacity="1"></stop>
+								<stop offset="0.8976" stop-color="#020d42" stop-opacity="1"></stop>
+								<stop offset="1" stop-color="#020c38" stop-opacity="1"></stop>
+							</linearGradient>
+							<path fill="url(#Path_325_i)" id="Path_325_i" d="M 353.6290893554688 270.8558349609375 C 347.9750671386719 272.4408264160156 343.1573181152344 277.2028198242188 341.5788879394531 282.76953125 C 340.8366088867188 285.3807983398438 340.76953125 288.088134765625 340.9036865234375 290.7396850585938 C 341.632568359375 305.2937622070312 349.9312744140625 314.9764404296875 357.47216796875 326.1972045898438 C 365.8424987792969 338.6519775390625 376.7702941894531 349.30712890625 388.0022888183594 359.21337890625 C 392.5921020507812 363.2621459960938 397.6804504394531 366.7631225585938 402.2702026367188 370.83203125 C 408.2908630371094 376.1707763671875 415.2527160644531 385.006103515625 423.942626953125 376.3563232421875 C 429.9162902832031 370.4117431640625 426.9451599121094 365.1580200195312 423.8599548339844 359.3944091796875 C 420.2404174804688 352.6337890625 397.139404296875 313.7601928710938 391.6285400390625 306.085205078125 C 386.4417724609375 298.8662719726562 381.0873413085938 291.7659301757812 375.7776489257812 284.6363525390625 C 370.1885070800781 277.1334838867188 365.4198913574219 267.5469970703125 353.6290893554688 270.8558349609375 Z">
+							</path>
+						</svg>
+					</div>
+					<div id="Group_159">
+						<svg class="Path_326_l" viewBox="326.776 265.495 40.701 137.479">
+							<linearGradient id="Path_326_l" spreadMethod="pad" x1="0.5" x2="0.5" y1="0" y2="1">
+								<stop offset="0" stop-color="#074fc0" stop-opacity="1"></stop>
+								<stop offset="0.1616" stop-color="#06319d" stop-opacity="1"></stop>
+								<stop offset="0.2876" stop-color="#061f88" stop-opacity="1"></stop>
+							</linearGradient>
+							<path fill="url(#Path_326_l)" id="Path_326_l" d="M 358.2523193359375 266.8656921386719 C 352.8241577148438 264.4512023925781 346.0948486328125 265.2784118652344 341.4156494140625 268.9358825683594 C 339.218017578125 270.6551513671875 337.4920654296875 272.8997192382812 335.9606323242188 275.2315368652344 C 327.5433349609375 288.0284118652344 328.0911865234375 301.7329711914062 327.0873413085938 316.2378845214844 C 325.9761962890625 332.3368530273438 327.9882202148438 348.6101989746094 330.7024536132812 364.4542541503906 C 331.811279296875 370.9287109375 333.6489868164062 377.2735290527344 334.7444458007812 383.7636413574219 C 336.1819458007812 392.2814331054688 336.1976318359375 404.3808898925781 348.375244140625 402.8404235839844 C 356.7454833984375 401.7807006835938 357.6531982421875 395.3622436523438 358.7889404296875 388.4338989257812 C 360.1168823242188 380.311767578125 365.9653930664062 332.0730590820312 366.3699951171875 321.9209594726562 C 366.7523803710938 312.36572265625 366.9266357421875 302.8016357421875 367.1547241210938 293.241943359375 C 367.3961791992188 283.1815185546875 369.5670166015625 271.902587890625 358.2523193359375 266.8656921386719 Z">
+							</path>
+						</svg>
+						<div id="Group_158">
+							<div id="Group_155">
+								<div id="Group_154">
+									<svg class="Path_327_q" viewBox="331.209 363.814 3.233 15.423">
+										<linearGradient id="Path_327_q" spreadMethod="pad" x1="0" x2="1" y1="0.5" y2="0.5">
+											<stop offset="0" stop-color="#074fc0" stop-opacity="1"></stop>
+											<stop offset="0.1616" stop-color="#06319d" stop-opacity="1"></stop>
+											<stop offset="0.2876" stop-color="#061f88" stop-opacity="1"></stop>
+										</linearGradient>
+										<path fill="url(#Path_327_q)" id="Path_327_q" d="M 331.209228515625 363.814453125 L 331.5472717285156 379.23779296875 L 333.9783630371094 379.23779296875 L 334.4424438476562 367.0299072265625 L 331.209228515625 363.814453125 Z">
+										</path>
+									</svg>
+								</div>
+							</div>
+							<div id="Group_157">
+								<div id="Group_156">
+									<svg class="Path_328_u" viewBox="331.193 358.549 30.828 42.292">
+										<linearGradient id="Path_328_u" spreadMethod="pad" x1="-0.06" x2="1.012" y1="0.163" y2="0.944">
+											<stop offset="0" stop-color="#074fc0" stop-opacity="1"></stop>
+											<stop offset="0.1616" stop-color="#06319d" stop-opacity="1"></stop>
+											<stop offset="0.2876" stop-color="#061f88" stop-opacity="1"></stop>
+										</linearGradient>
+										<path fill="url(#Path_328_u)" id="Path_328_u" d="M 352.8280944824219 382.1436462402344 C 352.8280944824219 382.1436462402344 363.3759765625 396.6306762695312 361.8735656738281 398.9624938964844 C 360.3734436035156 401.3009643554688 348.8665161132812 401.629638671875 341.8622436523438 398.9624938964844 C 334.8579406738281 396.2975463867188 334.6924438476562 379.0338439941406 331.5223388671875 371.615966796875 C 330.1965637207031 368.5106506347656 333.0358581542969 359.3444519042969 337.0265197753906 358.6804504394531 C 341.0171508789062 358.0142211914062 345.6985778808594 360.1067810058594 345.6985778808594 360.1067810058594 C 345.6985778808594 360.1067810058594 341.6140747070312 370.661376953125 352.8280944824219 382.1436462402344 Z">
+										</path>
+									</svg>
+								</div>
+							</div>
+							<svg class="Path_329_w" viewBox="331.599 350.599 23.946 49.526">
+								<linearGradient id="Path_329_w" spreadMethod="pad" x1="0.5" x2="0.5" y1="1" y2="-1.416">
+									<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+									<stop offset="0.2699" stop-color="#ffcebd" stop-opacity="1"></stop>
+									<stop offset="0.5038" stop-color="#ffc5b2" stop-opacity="1"></stop>
+									<stop offset="0.7243" stop-color="#ffb6a1" stop-opacity="1"></stop>
+									<stop offset="0.9354" stop-color="#ffa188" stop-opacity="1"></stop>
+									<stop offset="1" stop-color="#ff9a7f" stop-opacity="1"></stop>
+								</linearGradient>
+								<path fill="url(#Path_329_w)" id="Path_329_w" d="M 345.4556274414062 371.8377380371094 C 345.808837890625 367.0355529785156 346.3789367675781 359.3136596679688 347.0183410644531 350.5990600585938 L 331.5990600585938 350.5990600585938 C 333.3227233886719 360.1363220214844 335.4175720214844 370.4672546386719 335.7886352539062 372.8617248535156 C 335.6455993652344 374.4020690917969 335.569580078125 376.2956237792969 335.6902770996094 378.4642333984375 C 336.0234375 384.487060546875 338.8582763671875 394.4469604492188 342.5269165039062 397.8876647949219 C 346.1956176757812 401.3237915039062 355.2008361816406 400.1165771484375 355.5339660644531 398.7796630859375 C 355.8671264648438 397.45166015625 348.6973571777344 386.4432983398438 347.3648681640625 381.6031799316406 C 346.4684143066406 378.3569946289062 345.7998962402344 374.2142639160156 345.4556274414062 371.8377380371094 Z">
+								</path>
+							</svg>
+							<svg class="Path_330_y" viewBox="329.689 319.233 23.75 85.181">
+								<linearGradient id="Path_330_y" spreadMethod="pad" x1="0.5" x2="0.5" y1="1.405" y2="0">
+									<stop offset="0" stop-color="#074fc0" stop-opacity="1"></stop>
+									<stop offset="0.1616" stop-color="#06319d" stop-opacity="1"></stop>
+									<stop offset="0.2876" stop-color="#061f88" stop-opacity="1"></stop>
+								</linearGradient>
+								<path fill="url(#Path_330_y)" id="Path_330_y" d="M 331.9824829101562 377.286376953125 C 332.9103088378906 384.2996520996094 335.2688903808594 396.4683227539062 336.8003234863281 404.4138793945312 L 348.2715148925781 404.4138793945312 C 349.834228515625 383.1795349121094 353.064697265625 339.1393737792969 353.2323913574219 335.244873046875 C 353.4603881835938 329.9530944824219 354.285400390625 325.3475952148438 349.7380981445312 321.5492553710938 C 348.51513671875 320.5298156738281 347.0440673828125 319.8099365234375 345.4881286621094 319.4745788574219 C 345.329345703125 319.4409790039062 345.1683959960938 319.4097595214844 345.0073852539062 319.3851318359375 C 337.7034912109375 318.22705078125 332.6956481933594 323.8497924804688 331.7298278808594 330.4248352050781 C 330.4935913085938 338.82861328125 329.3332214355469 346.762939453125 329.79150390625 355.24951171875 C 330.189453125 362.6205139160156 331.0144958496094 369.9713439941406 331.9824829101562 377.286376953125 Z">
+								</path>
+							</svg>
+						</div>
+					</div>
+					<svg class="Path_331_" viewBox="334.826 197.966 47.687 52.458">
+						<linearGradient id="Path_331_" spreadMethod="pad" x1="-59.165" x2="-58.165" y1="0.5" y2="0.5">
+							<stop offset="0" stop-color="#071786" stop-opacity="1"></stop>
+							<stop offset="0.1509" stop-color="#05136b" stop-opacity="1"></stop>
+							<stop offset="0.3236" stop-color="#031054" stop-opacity="1"></stop>
+							<stop offset="0.5107" stop-color="#020d44" stop-opacity="1"></stop>
+							<stop offset="0.7204" stop-color="#020c3b" stop-opacity="1"></stop>
+							<stop offset="1" stop-color="#020c38" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_331_)" id="Path_331_" d="M 339.1279296875 208.0491027832031 C 335.4524841308594 213.5130310058594 333.8719177246094 220.5933532714844 335.4122924804688 227.7295837402344 C 336.9973449707031 235.0804138183594 341.47314453125 242.01318359375 347.3953857421875 246.6253356933594 C 353.8876953125 251.68017578125 361.3302612304688 251.4431762695312 368.3681030273438 247.374267578125 C 372.9847717285156 244.7049255371094 376.6981201171875 240.6337585449219 379.4189758300781 236.0462036132812 C 389.2602844238281 219.4531555175781 374.1383056640625 195.67919921875 354.9541625976562 198.1429138183594 C 348.4863891601562 198.974609375 342.7496643066406 202.6656188964844 339.1279296875 208.0491027832031 Z">
+						</path>
+					</svg>
+					<svg class="Path_332_" viewBox="347.122 225.587 77.137 20.999">
+						<linearGradient id="Path_332_" spreadMethod="pad" x1="-49.155" x2="-48.469" y1="-41.337" y2="-39.881">
+							<stop offset="0" stop-color="#5964ff" stop-opacity="1"></stop>
+							<stop offset="0.9973" stop-color="#00beb9" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_332_)" id="Path_332_" d="M 424.2590026855469 236.0162200927734 C 420.7333984375 239.6714935302734 415.3141479492188 241.6366577148438 414.8468933105469 241.7886505126953 C 406.7359313964844 244.4222564697266 398.2315063476562 245.8195495605469 389.7337646484375 246.3315277099609 C 382.7630310058594 246.7518157958984 375.7586975097656 246.6534423828125 368.8035583496094 246.0229949951172 C 362.729248046875 245.4730224609375 342.2507019042969 244.712890625 348.1908569335938 233.8565979003906 C 349.6708374023438 231.1514129638672 352.6420593261719 229.6647186279297 355.5103454589844 228.8867340087891 C 368.4168701171875 225.3924255371094 413.8699035644531 225.5890808105469 413.8699035644531 225.5890808105469 L 424.2590026855469 236.0162200927734 Z">
+						</path>
+					</svg>
+					<svg class="Path_333_" viewBox="330.489 216.125 61.081 124.088">
+						<linearGradient id="Path_333_" spreadMethod="pad" x1="-45.691" x2="-45.691" y1="1" y2="0">
+							<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+							<stop offset="0.4889" stop-color="#ffcfbf" stop-opacity="1"></stop>
+							<stop offset="0.665" stop-color="#ffc9b8" stop-opacity="1"></stop>
+							<stop offset="0.7905" stop-color="#ffbfac" stop-opacity="1"></stop>
+							<stop offset="0.892" stop-color="#ffb19b" stop-opacity="1"></stop>
+							<stop offset="0.9779" stop-color="#ff9f85" stop-opacity="1"></stop>
+							<stop offset="1" stop-color="#ff9a7f" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_333_)" id="Path_333_" d="M 391.5022888183594 277.0042114257812 C 390.8829650878906 270.4961547851562 377.63671875 240.9095306396484 377.63671875 240.9095306396484 C 377.63671875 240.9095306396484 373.9725036621094 240.2410888671875 371.6519165039062 239.4250335693359 C 370.4960327148438 234.4462432861328 371.3031005859375 229.8184204101562 371.3031005859375 229.8184204101562 L 357.562744140625 216.1250152587891 C 359.1858520507812 231.1262969970703 353.1339416503906 236.4806823730469 353.1339416503906 236.4806823730469 C 350.978759765625 236.5968933105469 343.9990844726562 236.9501800537109 340.8400573730469 237.3659973144531 C 338.8056640625 237.63427734375 337.0774841308594 238.2356719970703 335.651123046875 238.9533233642578 C 332.4496459960938 240.5585174560547 330.8913879394531 244.2517852783203 331.756591796875 247.7259826660156 C 334.0592956542969 256.9660339355469 338.8972778320312 277.6480712890625 339.2662048339844 289.6065673828125 C 339.7513122558594 305.3455505371094 330.489013671875 340.2128601074219 330.489013671875 340.2128601074219 L 387.402099609375 340.04296875 C 383.5299072265625 324.3062133789062 380.9141845703125 301.9585876464844 380.9141845703125 301.956298828125 C 379.3201599121094 289.9866638183594 392.6290283203125 288.8307800292969 391.5022888183594 277.0042114257812 Z">
+						</path>
+					</svg>
+					<svg class="Path_334_" viewBox="335.049 225.764 52.168 109.029">
+						<linearGradient id="Path_334_" spreadMethod="pad" x1="-53.582" x2="-53.582" y1="1.063" y2="0">
+							<stop offset="0" stop-color="#f9fbfc" stop-opacity="1"></stop>
+							<stop offset="0.2923" stop-color="#f1f5fc" stop-opacity="1"></stop>
+							<stop offset="0.7329" stop-color="#dce6fd" stop-opacity="1"></stop>
+							<stop offset="0.9973" stop-color="#cddbff" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_334_)" id="Path_334_" d="M 387.1553955078125 265.0937194824219 C 386.5361633300781 258.5856628417969 372.0044555664062 230.0586853027344 372.0044555664062 230.0586853027344 C 372.0044555664062 230.0586853027344 370.1197204589844 228.1941680908203 365.167724609375 228.6412811279297 C 365.0939636230469 228.6480102539062 363.3568420410156 242.7996978759766 363.3568420410156 242.7996978759766 L 349.9295043945312 226.7790222167969 C 344.9842529296875 226.0211029052734 343.3522338867188 225.7640533447266 343.3522338867188 225.7640533447266 C 341.1992492675781 225.8825378417969 338.3645324707031 226.1016082763672 335.2055053710938 226.5174255371094 C 335.1495971679688 226.5241546630859 335.1049194335938 226.5420379638672 335.0490417480469 226.5487060546875 L 335.0490417480469 331.1595153808594 C 339.712646484375 332.8810119628906 344.5751647949219 334.0971984863281 349.7372741699219 334.5398254394531 C 362.0713806152344 335.5950622558594 373.4508666992188 333.3414611816406 384.0769348144531 328.0295715332031 C 380.193603515625 311.6824951171875 375.2796325683594 290.0480651855469 375.2796325683594 290.0458068847656 C 373.6856079101562 278.0761413574219 388.2821960449219 276.9202575683594 387.1553955078125 265.0937194824219 Z">
+						</path>
+					</svg>
+					<svg class="Path_335_" viewBox="327.611 225.267 37.021 121.861">
+						<linearGradient id="Path_335_" spreadMethod="pad" x1="-75.71" x2="-75.71" y1="0" y2="1.869">
+							<stop offset="0" stop-color="#5964ff" stop-opacity="1"></stop>
+							<stop offset="0.9973" stop-color="#00beb9" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_335_)" id="Path_335_" d="M 359.6412353515625 346.0820922851562 C 365.65966796875 341.9752197265625 364.5574340820312 326.9158325195312 364.5462341308594 319.4822387695312 L 364.4143981933594 232.4996032714844 C 361.2330627441406 229.2042999267578 356.7237243652344 224.7463531494141 352.5430297851562 225.3164367675781 C 350.3901062011719 225.4349212646484 347.5553283691406 225.6540679931641 344.3963317871094 226.0698699951172 C 342.3619384765625 226.3381652832031 340.6337890625 226.9395446777344 339.2073974609375 227.6572113037109 C 336.0058898925781 229.2624053955078 334.4476623535156 232.9556579589844 335.3128356933594 236.4298706054688 C 337.6156005859375 245.6698760986328 342.4535522460938 266.3519287109375 342.822509765625 278.3104248046875 C 343.3075866699219 294.0494384765625 327.6065673828125 337.9219970703125 327.6110229492188 337.9241333007812 C 334.0452880859375 340.3789672851562 353.3970642089844 350.341064453125 359.6412353515625 346.0820922851562 Z">
+						</path>
+					</svg>
+					<svg class="Path_336_a" viewBox="348.676 226.737 22.503 114.757">
+						<linearGradient id="Path_336_a" spreadMethod="pad" x1="-124.876" x2="-124.876" y1="-2.217" y2="1">
+							<stop offset="0" stop-color="#5964ff" stop-opacity="1"></stop>
+							<stop offset="0.9973" stop-color="#00beb9" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_336_a)" id="Path_336_a" d="M 370.3171691894531 263.8917236328125 C 369.6979064941406 257.3836669921875 355.1639099121094 227.7970275878906 355.1639099121094 227.7970275878906 C 355.1639099121094 227.7970275878906 353.2569580078125 226.1850891113281 348.6760559082031 226.936279296875 C 348.7699279785156 232.5723571777344 349.1835632324219 242.603759765625 349.2774963378906 248.2398376464844 L 349.9011840820312 285.6289367675781 C 350.1112976074219 298.2716064453125 351.3252868652344 312.9576416015625 351.5376586914062 325.6002197265625 C 351.6159057617188 330.2972717285156 350.9496765136719 338.846435546875 356.154296875 341.3929138183594 C 357.886962890625 342.2402038574219 371.3410949707031 337.4738464355469 371.1779479980469 336.8076171875 C 367.3034973144531 321.0730895996094 362.5192260742188 289.9683837890625 362.5192260742188 289.9661254882812 C 360.9274597167969 277.9963684082031 371.4439392089844 275.7182922363281 370.3171691894531 263.8917236328125 Z">
+						</path>
+					</svg>
+					<svg class="Path_337_c" viewBox="331.625 232.604 59.372 49.498">
+						<linearGradient id="Path_337_c" spreadMethod="pad" x1="0.585" x2="0.302" y1="0.247" y2="0.731">
+							<stop offset="0" stop-color="#e7e6ff" stop-opacity="1"></stop>
+							<stop offset="0.3393" stop-color="#c9d2f8" stop-opacity="1"></stop>
+							<stop offset="0.7637" stop-color="#a9bcf0" stop-opacity="1"></stop>
+							<stop offset="1" stop-color="#9eb5ee" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_337_c)" id="Path_337_c" d="M 390.9973754882812 262.1750183105469 C 387.2794799804688 263.496337890625 384.1674194335938 264.7416381835938 381.7373046875 265.9913024902344 C 381.1626586914062 266.2886352539062 380.6686401367188 266.6038513183594 380.2080078125 266.9280700683594 L 380.20361328125 266.8319091796875 C 380.20361328125 266.8319091796875 344.7908325195312 238.3384552001953 332.5193481445312 233.0220794677734 C 332.2152709960938 232.89013671875 331.9179077148438 232.7471008300781 331.6250610351562 232.60400390625 C 333.3554077148438 239.9011993408203 335.5731811523438 250.0331268310547 336.8521118164062 258.9154663085938 C 340.5408325195312 262.1393127441406 344.3928833007812 265.1797790527344 348.4013671875 267.9989318847656 C 355.365478515625 272.897216796875 362.8839721679688 277.10693359375 370.8675537109375 280.1050109863281 C 371.3280639648438 280.2771301269531 380.1544799804688 281.7370300292969 380.163330078125 281.7146911621094 L 380.1723022460938 281.6766357421875 C 381.0799560546875 281.9919128417969 382.2291259765625 282.1148376464844 383.5413818359375 282.1014709472656 C 382.6068725585938 272.7653198242188 389.1663818359375 269.4230651855469 390.9973754882812 262.1750183105469 Z">
+						</path>
+					</svg>
+					<div id="Group_162">
+						<div id="Group_161">
+							<div id="Group_160">
+								<svg class="Path_338_h" viewBox="339.433 203.984 34.381 41.674">
+									<linearGradient id="Path_338_h" spreadMethod="pad" x1="-82.063" x2="-81.063" y1="0.5" y2="0.5">
+										<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+										<stop offset="0.3861" stop-color="#ffcfbe" stop-opacity="1"></stop>
+										<stop offset="0.5877" stop-color="#ffc8b6" stop-opacity="1"></stop>
+										<stop offset="0.7467" stop-color="#ffbda9" stop-opacity="1"></stop>
+										<stop offset="0.8825" stop-color="#ffad96" stop-opacity="1"></stop>
+										<stop offset="1" stop-color="#ff9a7f" stop-opacity="1"></stop>
+									</linearGradient>
+									<path fill="url(#Path_338_h)" id="Path_338_h" d="M 372.2708435058594 209.9663391113281 C 373.6569519042969 218.0169067382812 376.3978881835938 237.9947357177734 367.8487243652344 245.5467834472656 C 367.8487243652344 245.5467834472656 349.4224548339844 247.7734832763672 340.7414245605469 232.3362579345703 C 332.0603942871094 216.8990783691406 369.2952270507812 192.6533966064453 372.2708435058594 209.9663391113281 Z">
+									</path>
+								</svg>
+							</div>
+							<svg class="Path_339_j" viewBox="352.79 211.482 5.811 12.19">
+								<linearGradient id="Path_339_j" spreadMethod="pad" x1="-485.974" x2="-484.815" y1="0.125" y2="1.081">
+									<stop offset="0" stop-color="#eea281" stop-opacity="1"></stop>
+									<stop offset="0.246" stop-color="#ed9b7b" stop-opacity="1"></stop>
+									<stop offset="0.5823" stop-color="#ed8a6b" stop-opacity="1"></stop>
+									<stop offset="0.9693" stop-color="#ec6d52" stop-opacity="1"></stop>
+									<stop offset="1" stop-color="#ec6b50" stop-opacity="1"></stop>
+								</linearGradient>
+								<path fill="url(#Path_339_j)" id="Path_339_j" d="M 352.7896728515625 211.4815368652344 L 352.7896728515625 223.6714324951172 L 358.6007690429688 223.6714324951172 L 352.7896728515625 211.4815368652344 Z">
+								</path>
+							</svg>
+						</div>
+						<svg class="Path_340_l" viewBox="336.911 198.439 28.469 34.216">
+							<linearGradient id="Path_340_l" spreadMethod="pad" x1="-99.103" x2="-98.103" y1="0.5" y2="0.5">
+								<stop offset="0" stop-color="#030f4b" stop-opacity="1"></stop>
+								<stop offset="0.1501" stop-color="#020d44" stop-opacity="1"></stop>
+								<stop offset="0.5141" stop-color="#020c3b" stop-opacity="1"></stop>
+								<stop offset="1" stop-color="#020c38" stop-opacity="1"></stop>
+							</linearGradient>
+							<path fill="url(#Path_340_l)" id="Path_340_l" d="M 365.1049194335938 207.5198669433594 C 365.8471374511719 210.459716796875 365.1473083496094 213.6813049316406 362.2879333496094 216.4736633300781 C 358.4694213867188 220.1982421875 354.628662109375 224.0122985839844 350.3517761230469 227.2137451171875 L 347.5796203613281 232.6553344726562 L 342.9115600585938 222.158935546875 C 342.1849365234375 221.9152526855469 337.0653686523438 219.4470825195312 337.0161743164062 218.8099365234375 C 336.5936584472656 213.4890747070312 337.3581848144531 207.4639892578125 340.9218139648438 203.2519836425781 C 344.1434020996094 199.4491577148438 349.4620056152344 197.9422912597656 354.2999572753906 198.5817260742188 C 359.5582580566406 199.2792358398438 363.9804077148438 203.07763671875 365.1049194335938 207.5198669433594 Z">
+							</path>
+						</svg>
+					</div>
+					<svg class="Path_341_n" viewBox="338.09 209.822 8.033 18.651">
+						<linearGradient id="Path_341_n" spreadMethod="pad" x1="-350.724" x2="-350.724" y1="1" y2="0">
+							<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+							<stop offset="0.3073" stop-color="#ffcbba" stop-opacity="1"></stop>
+							<stop offset="0.729" stop-color="#ffbda9" stop-opacity="1"></stop>
+							<stop offset="1" stop-color="#ffb19a" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_341_n)" id="Path_341_n" d="M 346.1228637695312 214.1954040527344 C 346.1228637695312 214.1954040527344 343.0510864257812 207.6002197265625 339.6260986328125 210.607177734375 C 336.2010498046875 213.6119079589844 338.5618896484375 225.9683837890625 346.1228637695312 228.4723205566406 L 346.1228637695312 214.1954040527344 Z">
+						</path>
+					</svg>
+					<svg class="Path_342_p" viewBox="385.26 191.32 20.443 34.715">
+						<linearGradient id="Path_342_p" spreadMethod="pad" x1="-246.736" x2="-245.603" y1="78.816" y2="78.816">
+							<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+							<stop offset="0.3445" stop-color="#ffb9a5" stop-opacity="1"></stop>
+							<stop offset="0.7588" stop-color="#ffa289" stop-opacity="1"></stop>
+							<stop offset="1" stop-color="#ff9a7f" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_342_p)" id="Path_342_p" d="M 391.8485107421875 206.3995056152344 L 402.959716796875 191.3200225830078 C 402.959716796875 191.3200225830078 405.0164489746094 193.4438781738281 404.5716247558594 195.4582214355469 C 404.126708984375 197.4725494384766 405.0276794433594 198.9570007324219 404.8778991699219 200.7924957275391 C 404.7303161621094 202.6279449462891 406.3914489746094 206.9807586669922 405.3675231933594 209.9139404296875 C 404.3413391113281 212.8471374511719 399.776123046875 214.5574035644531 398.5957641601562 217.300537109375 C 397.4152526855469 220.0459442138672 395.3271789550781 226.0352630615234 395.3271789550781 226.0352630615234 L 385.2600402832031 221.5572357177734 L 388.5285339355469 213.6117095947266 C 388.5285339355469 213.6117095947266 386.0491638183594 204.1526794433594 390.6009521484375 198.3936157226562 L 391.8485107421875 206.3995056152344 Z">
+						</path>
+					</svg>
+					<svg class="Path_343_r" viewBox="375.758 200.868 34.075 67.418">
+						<linearGradient id="Path_343_r" spreadMethod="pad" x1="-147.211" x2="-148.081" y1="40.317" y2="41.231">
+							<stop offset="0" stop-color="#5964ff" stop-opacity="1"></stop>
+							<stop offset="0.9973" stop-color="#00beb9" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_343_r)" id="Path_343_r" d="M 386.7044677734375 268.2864685058594 C 386.7044677734375 268.2864685058594 373.590087890625 264.3941955566406 376.0694580078125 254.2375793457031 C 378.548828125 244.0787658691406 389.0966186523438 229.5939331054688 400.2346801757812 200.8680114746094 L 409.832275390625 206.0122985839844 C 409.832275390625 206.0122985839844 397.2500610351562 262.4468994140625 386.7044677734375 268.2864685058594 Z">
+						</path>
+					</svg>
+					<svg class="Path_344_t" viewBox="388.675 190.042 10.083 18.665">
+						<linearGradient id="Path_344_t" spreadMethod="pad" x1="-431.586" x2="-430.628" y1="72.339" y2="72.339">
+							<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+							<stop offset="0.3445" stop-color="#ffb9a5" stop-opacity="1"></stop>
+							<stop offset="0.7588" stop-color="#ffa289" stop-opacity="1"></stop>
+							<stop offset="1" stop-color="#ff9a7f" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_344_t)" id="Path_344_t" d="M 392.86474609375 190.0420227050781 L 398.4895935058594 196.3711547851562 L 398.7579040527344 208.7074890136719 L 388.675048828125 197.3324737548828 C 388.675048828125 197.3324737548828 389.4486389160156 195.0968017578125 391.0962524414062 196.5723419189453 L 388.9791564941406 193.6637725830078 C 388.9791564941406 193.6637725830078 387.3426818847656 190.1806182861328 392.86474609375 190.0420227050781 Z">
+						</path>
+					</svg>
+					<div id="Group_165">
+						<div id="Group_164">
+							<div id="Group_163">
+								<svg class="Path_345_y" viewBox="347.703 224.826 5.101 19.133">
+									<linearGradient id="Path_345_y" spreadMethod="pad" x1="0.5" x2="0.5" y1="1" y2="0">
+										<stop offset="0" stop-color="#e7e6ff" stop-opacity="1"></stop>
+										<stop offset="0.3393" stop-color="#c9d2f8" stop-opacity="1"></stop>
+										<stop offset="0.7637" stop-color="#a9bcf0" stop-opacity="1"></stop>
+										<stop offset="1" stop-color="#9eb5ee" stop-opacity="1"></stop>
+									</linearGradient>
+									<path fill="url(#Path_345_y)" id="Path_345_y" d="M 347.7203979492188 243.9587554931641 L 352.8042907714844 239.1699829101562 L 349.8778686523438 224.8260498046875 C 349.8778686523438 224.8260498046875 347.47900390625 243.6591644287109 347.7203979492188 243.9587554931641 Z">
+									</path>
+								</svg>
+								<svg class="Path_346_" viewBox="348.676 224.826 11.412 16.317">
+									<linearGradient id="Path_346_" spreadMethod="pad" x1="0.5" x2="0.5" y1="1" y2="0">
+										<stop offset="0" stop-color="#f9fbfc" stop-opacity="1"></stop>
+										<stop offset="0.9973" stop-color="#cddbff" stop-opacity="1"></stop>
+									</linearGradient>
+									<path fill="url(#Path_346_)" id="Path_346_" d="M 348.6755676269531 224.8263702392578 L 351.6030883789062 239.1699066162109 L 360.0874328613281 241.1432952880859 L 348.6755676269531 224.8263702392578 Z">
+									</path>
+								</svg>
+							</div>
+							<svg class="Path_347_" viewBox="339.433 224.38 15.919 20.955">
+								<linearGradient id="Path_347_" spreadMethod="pad" x1="0.5" x2="0.5" y1="1" y2="0">
+									<stop offset="0" stop-color="#f9fbfc" stop-opacity="1"></stop>
+									<stop offset="0.3069" stop-color="#f0f4fc" stop-opacity="1"></stop>
+									<stop offset="0.8031" stop-color="#d8e3fe" stop-opacity="1"></stop>
+									<stop offset="0.9973" stop-color="#cddbff" stop-opacity="1"></stop>
+								</linearGradient>
+								<path fill="url(#Path_347_)" id="Path_347_" d="M 339.4326171875 225.974609375 L 348.0296630859375 245.3351440429688 L 355.3516235351562 238.2317810058594 L 341.4534301757812 224.3800964355469 L 339.4326171875 225.974609375 Z">
+								</path>
+							</svg>
+						</div>
+						<svg class="Path_348_" viewBox="345.338 230.576 5.307 6.279">
+							<linearGradient id="Path_348_" spreadMethod="pad" x1="0.5" x2="0.5" y1="1" y2="0">
+								<stop offset="0" stop-color="#e7e6ff" stop-opacity="1"></stop>
+								<stop offset="0.3393" stop-color="#c9d2f8" stop-opacity="1"></stop>
+								<stop offset="0.7637" stop-color="#a9bcf0" stop-opacity="1"></stop>
+								<stop offset="1" stop-color="#9eb5ee" stop-opacity="1"></stop>
+							</linearGradient>
+							<path fill="url(#Path_348_)" id="Path_348_" d="M 348.0551147460938 230.5759124755859 L 350.6444091796875 236.8545227050781 L 345.3375854492188 233.2120208740234 L 348.0551147460938 230.5759124755859 Z">
+							</path>
+						</svg>
+					</div>
+				</div>
+			</div>
+			<div id="Group_175">
+				<svg class="Path_349" viewBox="366.117 173.222 465.018 453.065">
+					<path fill="rgba(242,242,242,1)" id="Path_349" d="M 704.9283447265625 249.3863220214844 L 623.671142578125 191.1855163574219 L 623.6689453125 191.1855163574219 L 598.5916748046875 173.2220153808594 L 366.1170654296875 339.7828063964844 L 366.1170654296875 408.8533935546875 L 366.1170654296875 514.9061889648438 L 366.1170654296875 583.223388671875 C 366.1170654296875 607.00634765625 385.3996276855469 626.2865600585938 409.1824951171875 626.2865600585938 L 788.0723876953125 626.2865600585938 C 811.8553466796875 626.2865600585938 831.135498046875 607.00634765625 831.135498046875 583.223388671875 L 831.135498046875 514.9061889648438 L 831.135498046875 408.8533935546875 L 831.135498046875 339.7828063964844 L 704.9283447265625 249.3863220214844 Z">
+					</path>
+				</svg>
+				<div id="Group_173">
+					<div id="Group_172">
+						<svg class="Rectangle_80">
+							<rect fill="rgba(255,255,255,1)" stroke="rgba(112,112,112,1)" stroke-width="1px" stroke-linejoin="miter" stroke-linecap="butt" stroke-miterlimit="4" shape-rendering="auto" id="Rectangle_80" rx="0" ry="0" x="0" y="0" width="370.542" height="428.781">
+							</rect>
+						</svg>
+						<div id="Group_171">
+							<svg class="Rectangle_81_c">
+								<linearGradient id="Rectangle_81_c" spreadMethod="pad" x1="0.507" x2="0.458" y1="-0.124" y2="4.465">
+									<stop offset="0" stop-color="#e3ebfd" stop-opacity="1"></stop>
+									<stop offset="0.9973" stop-color="#8f8bff" stop-opacity="1"></stop>
+								</linearGradient>
+								<rect fill="url(#Rectangle_81_c)" stroke="rgba(112,112,112,1)" stroke-width="1px" stroke-linejoin="miter" stroke-linecap="butt" stroke-miterlimit="4" shape-rendering="auto" id="Rectangle_81_c" rx="0" ry="0" x="0" y="0" width="130.357" height="110.667">
+								</rect>
+							</svg>
+							<div id="Group_170">
+								<svg class="Rectangle_82_f">
+									<linearGradient id="Rectangle_82_f" spreadMethod="pad" x1="0.504" x2="0.464" y1="-2.406" y2="26.384">
+										<stop offset="0" stop-color="#e3ebfd" stop-opacity="1"></stop>
+										<stop offset="0.9973" stop-color="#8f8bff" stop-opacity="1"></stop>
+									</linearGradient>
+									<rect fill="url(#Rectangle_82_f)" stroke="rgba(112,112,112,1)" stroke-width="1px" stroke-linejoin="miter" stroke-linecap="butt" stroke-miterlimit="4" shape-rendering="auto" id="Rectangle_82_f" rx="0" ry="0" x="0" y="0" width="157.405" height="17.64">
+									</rect>
+								</svg>
+								<div id="Group_169">
+									<svg class="Rectangle_83_i">
+										<linearGradient id="Rectangle_83_i" spreadMethod="pad" x1="0.507" x2="0.466" y1="-4.147" y2="24.636">
+											<stop offset="0" stop-color="#e3ebfd" stop-opacity="1"></stop>
+											<stop offset="0.9973" stop-color="#8f8bff" stop-opacity="1"></stop>
+										</linearGradient>
+										<rect fill="url(#Rectangle_83_i)" stroke="rgba(112,112,112,1)" stroke-width="1px" stroke-linejoin="miter" stroke-linecap="butt" stroke-miterlimit="4" shape-rendering="auto" id="Rectangle_83_i" rx="0" ry="0" x="0" y="0" width="157.405" height="17.645">
+										</rect>
+									</svg>
+									<div id="Group_168">
+										<svg class="Rectangle_84_l">
+											<linearGradient id="Rectangle_84_l" spreadMethod="pad" x1="0.509" x2="0.468" y1="-5.89" y2="22.899">
+												<stop offset="0" stop-color="#e3ebfd" stop-opacity="1"></stop>
+												<stop offset="0.9973" stop-color="#8f8bff" stop-opacity="1"></stop>
+											</linearGradient>
+											<rect fill="url(#Rectangle_84_l)" stroke="rgba(112,112,112,1)" stroke-width="1px" stroke-linejoin="miter" stroke-linecap="butt" stroke-miterlimit="4" shape-rendering="auto" id="Rectangle_84_l" rx="0" ry="0" x="0" y="0" width="157.405" height="17.641">
+											</rect>
+										</svg>
+										<svg class="Rectangle_85_n">
+											<linearGradient id="Rectangle_85_n" spreadMethod="pad" x1="0.506" x2="0.485" y1="-7.683" y2="21.099">
+												<stop offset="0" stop-color="#e3ebfd" stop-opacity="1"></stop>
+												<stop offset="0.9973" stop-color="#8f8bff" stop-opacity="1"></stop>
+											</linearGradient>
+											<rect fill="url(#Rectangle_85_n)" stroke="rgba(112,112,112,1)" stroke-width="1px" stroke-linejoin="miter" stroke-linecap="butt" stroke-miterlimit="4" shape-rendering="auto" id="Rectangle_85_n" rx="0" ry="0" x="0" y="0" width="305.794" height="17.645">
+											</rect>
+										</svg>
+										<svg class="Rectangle_86_p">
+											<linearGradient id="Rectangle_86_p" spreadMethod="pad" x1="0.507" x2="0.486" y1="-9.428" y2="19.361">
+												<stop offset="0" stop-color="#e3ebfd" stop-opacity="1"></stop>
+												<stop offset="0.9973" stop-color="#8f8bff" stop-opacity="1"></stop>
+											</linearGradient>
+											<rect fill="url(#Rectangle_86_p)" stroke="rgba(112,112,112,1)" stroke-width="1px" stroke-linejoin="miter" stroke-linecap="butt" stroke-miterlimit="4" shape-rendering="auto" id="Rectangle_86_p" rx="0" ry="0" x="0" y="0" width="305.794" height="17.641">
+											</rect>
+										</svg>
+										<svg class="Rectangle_87_r">
+											<linearGradient id="Rectangle_87_r" spreadMethod="pad" x1="0.508" x2="0.488" y1="-11.167" y2="17.615">
+												<stop offset="0" stop-color="#e3ebfd" stop-opacity="1"></stop>
+												<stop offset="0.9973" stop-color="#8f8bff" stop-opacity="1"></stop>
+											</linearGradient>
+											<rect fill="url(#Rectangle_87_r)" stroke="rgba(112,112,112,1)" stroke-width="1px" stroke-linejoin="miter" stroke-linecap="butt" stroke-miterlimit="4" shape-rendering="auto" id="Rectangle_87_r" rx="0" ry="0" x="0" y="0" width="305.794" height="17.645">
+											</rect>
+										</svg>
+										<svg class="Rectangle_88_t">
+											<linearGradient id="Rectangle_88_t" spreadMethod="pad" x1="0.51" x2="0.489" y1="-12.912" y2="15.877">
+												<stop offset="0" stop-color="#e3ebfd" stop-opacity="1"></stop>
+												<stop offset="0.9973" stop-color="#8f8bff" stop-opacity="1"></stop>
+											</linearGradient>
+											<rect fill="url(#Rectangle_88_t)" stroke="rgba(112,112,112,1)" stroke-width="1px" stroke-linejoin="miter" stroke-linecap="butt" stroke-miterlimit="4" shape-rendering="auto" id="Rectangle_88_t" rx="0" ry="0" x="0" y="0" width="305.794" height="17.642">
+											</rect>
+										</svg>
+										<svg class="Rectangle_89_v">
+											<linearGradient id="Rectangle_89_v" spreadMethod="pad" x1="0.511" x2="0.49" y1="-14.652" y2="14.132">
+												<stop offset="0" stop-color="#e3ebfd" stop-opacity="1"></stop>
+												<stop offset="0.9973" stop-color="#8f8bff" stop-opacity="1"></stop>
+											</linearGradient>
+											<rect fill="url(#Rectangle_89_v)" stroke="rgba(112,112,112,1)" stroke-width="1px" stroke-linejoin="miter" stroke-linecap="butt" stroke-miterlimit="4" shape-rendering="auto" id="Rectangle_89_v" rx="0" ry="0" x="0" y="0" width="305.794" height="17.644">
+											</rect>
+										</svg>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+					<svg class="Path_350_x" viewBox="366.131 247.725 464.974 286.468">
+						<linearGradient id="Path_350_x" spreadMethod="pad" x1="0.5" x2="0.5" y1="0" y2="1">
+							<stop offset="0" stop-color="#ffff3d" stop-opacity="1"></stop>
+							<stop offset="0.1434" stop-color="#ffe63b" stop-opacity="1"></stop>
+							<stop offset="0.3265" stop-color="#ffcf3a" stop-opacity="1"></stop>
+							<stop offset="0.5214" stop-color="#ffbe39" stop-opacity="1"></stop>
+							<stop offset="0.7346" stop-color="#ffb439" stop-opacity="1"></stop>
+							<stop offset="1" stop-color="#ffb139" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_350_x)" id="Path_350_x" d="M 767.6122436523438 286.8422546386719 L 767.6100463867188 286.8422546386719 L 668.666748046875 347.7996826171875 L 620.4503173828125 377.5048217773438 C 607.0586547851562 385.7566528320312 590.1549682617188 385.7543640136719 576.7610473632812 377.5025634765625 L 366.1310119628906 247.7250213623047 L 366.1310119628906 322.3064575195312 L 366.1310119628906 492.5426940917969 L 366.1310119628906 493.6627807617188 L 366.2450561523438 493.6627807617188 C 366.8508911132812 516.13330078125 385.1609191894531 534.1929931640625 407.78125 534.1929931640625 L 789.456787109375 534.1929931640625 C 812.0750122070312 534.1929931640625 830.385009765625 516.13330078125 830.9908447265625 493.6627807617188 L 831.10498046875 493.6627807617188 L 831.10498046875 492.5426940917969 L 831.10498046875 322.3020629882812 L 831.10498046875 247.7250213623047 L 767.6122436523438 286.8422546386719 Z">
+						</path>
+					</svg>
+					<svg class="Path_351" viewBox="552.992 232.589 19.223 61.469">
+						<path fill="rgba(168,161,145,1)" id="Path_351" d="M 552.992431640625 232.589111328125 L 552.992431640625 294.0576171875 L 572.2150268554688 282.81982421875 L 572.2150268554688 246.3663635253906 L 552.992431640625 232.589111328125 Z">
+						</path>
+					</svg>
+				</div>
+				<div id="Group_174">
+					<svg class="Path_352" viewBox="371.749 298.276 191.902 162.575">
+						<path fill="rgba(224,193,63,1)" id="Path_352" d="M 542.6112060546875 298.2760620117188 L 371.7489624023438 459.8111267089844 C 372.1357421875 460.1934204101562 372.6007995605469 460.486328125 373.0032348632812 460.8507080078125 L 563.6510009765625 311.2383728027344 L 542.6112060546875 298.2760620117188 Z">
+						</path>
+					</svg>
+					<svg class="Path_353" viewBox="482.622 297.91 192.027 163.413">
+						<path fill="rgba(224,193,63,1)" id="Path_353" d="M 505.0501098632812 297.9100341796875 L 482.6219787597656 311.7263488769531 L 673.3234252929688 461.3230590820312 C 673.752685546875 460.936279296875 674.23779296875 460.6143493652344 674.6492309570312 460.2074890136719 L 505.0501098632812 297.9100341796875 Z">
+						</path>
+					</svg>
+				</div>
+			</div>
+			<svg class="Path_354_" viewBox="330.637 226.147 59.417 50.68">
+				<linearGradient id="Path_354_" spreadMethod="pad" x1="-62.751" x2="-63.508" y1="-13.069" y2="-12.557">
+					<stop offset="0" stop-color="#5964ff" stop-opacity="1"></stop>
+					<stop offset="0.9973" stop-color="#00beb9" stop-opacity="1"></stop>
+				</linearGradient>
+				<path fill="url(#Path_354_)" id="Path_354_" d="M 389.8125610351562 276.8267211914062 C 389.8036499023438 276.8490600585938 380.977294921875 275.38916015625 380.5167846679688 275.217041015625 C 372.5354614257812 272.2190246582031 365.0147705078125 268.0092468261719 358.0505981445312 263.1109619140625 C 352.3385620117188 259.093505859375 346.9237670898438 254.6490173339844 341.8779907226562 249.8199768066406 C 337.4737548828125 245.6035766601562 323.8719482421875 235.3955383300781 334.770751953125 226.94921875 C 337.2075805664062 225.0578918457031 339.4432373046875 226.9515075683594 342.1685791015625 228.1341247558594 C 354.4400634765625 233.4483032226562 389.8528442382812 261.9417114257812 389.8528442382812 261.9417114257812 C 389.8528442382812 261.9417114257812 390.331298828125 275.6194763183594 389.8125610351562 276.8267211914062 Z">
+				</path>
+			</svg>
+			<div id="Group_176">
+				<svg class="Path_355_" viewBox="384.02 229.782 33.773 16.468">
+					<linearGradient id="Path_355_" spreadMethod="pad" x1="-141.044" x2="-140.198" y1="211.75" y2="211.75">
+						<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+						<stop offset="0.3445" stop-color="#ffb9a5" stop-opacity="1"></stop>
+						<stop offset="0.7588" stop-color="#ffa289" stop-opacity="1"></stop>
+						<stop offset="1" stop-color="#ff9a7f" stop-opacity="1"></stop>
+					</linearGradient>
+					<path fill="url(#Path_355_)" id="Path_355_" d="M 384.0200500488281 239.48046875 L 385.2563781738281 238.3536682128906 C 385.3122863769531 238.3045196533203 385.3703918457031 238.257568359375 385.4307861328125 238.2150421142578 L 396.7096557617188 230.1353912353516 C 397.1992797851562 229.7844543457031 397.8252868652344 229.6882781982422 398.3975830078125 229.8760681152344 L 416.4862365722656 235.7648010253906 C 416.7992553710938 235.8676452636719 417.0831298828125 236.0509338378906 417.3044738769531 236.2969055175781 L 417.3044738769531 236.2969055175781 C 418.1898193359375 237.2783203125 417.8232116699219 238.8410491943359 416.5935668945312 239.3261871337891 L 414.6709594726562 240.0841064453125 C 414.3311157226562 240.2182006835938 413.9577331542969 240.2495422363281 413.5978088378906 240.1757507324219 L 407.3983154296875 238.3782653808594 C 406.9534606933594 238.2888793945312 406.4996032714844 238.3536682128906 406.1038818359375 238.5773010253906 C 403.9151611328125 239.8135681152344 396.1171569824219 244.0769653320312 389.2738342285156 246.1717987060547 C 388.4063720703125 246.4355926513672 387.4741821289062 246.0130310058594 387.0649719238281 245.2036895751953 L 384.0200500488281 239.48046875 Z">
+					</path>
+				</svg>
+				<svg class="Path_356_" viewBox="355.545 231.903 72.543 38.223">
+					<linearGradient id="Path_356_" spreadMethod="pad" x1="-64.716" x2="-65.324" y1="91.16" y2="92.8">
+						<stop offset="0" stop-color="#5964ff" stop-opacity="1"></stop>
+						<stop offset="0.9973" stop-color="#00beb9" stop-opacity="1"></stop>
+					</linearGradient>
+					<path fill="url(#Path_356_)" id="Path_356_" d="M 358.9566955566406 269.6542663574219 C 358.9566955566406 269.6542663574219 350.2755737304688 259.3099365234375 360.6088256835938 253.9912872314453 C 370.9442749023438 248.6749267578125 393.1845397949219 243.4770355224609 425.418212890625 231.9030151367188 L 428.0876159667969 243.7073059082031 C 428.0876159667969 243.7073059082031 371.5411682128906 274.2552795410156 358.9566955566406 269.6542663574219 Z">
+					</path>
+				</svg>
+			</div>
+			<div id="Group_186">
+				<div id="Group_182">
+					<div id="Group_179">
+						<div id="Group_177">
+							<svg class="Path_357_e" viewBox="602.318 222.831 30.936 89.833">
+								<linearGradient id="Path_357_e" spreadMethod="pad" x1="36.588" x2="36.025" y1="-15.944" y2="-15.222">
+									<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+									<stop offset="0.3861" stop-color="#ffcfbe" stop-opacity="1"></stop>
+									<stop offset="0.5877" stop-color="#ffc8b6" stop-opacity="1"></stop>
+									<stop offset="0.7467" stop-color="#ffbda9" stop-opacity="1"></stop>
+									<stop offset="0.8825" stop-color="#ffad96" stop-opacity="1"></stop>
+									<stop offset="1" stop-color="#ff9a7f" stop-opacity="1"></stop>
+								</linearGradient>
+								<path fill="url(#Path_357_e)" id="Path_357_e" d="M 607.2656860351562 222.8310241699219 C 607.2656860351562 222.8310241699219 614.8401489257812 228.0803527832031 617.7977905273438 235.6681823730469 C 620.75341796875 243.2537841796875 620.0783081054688 249.802001953125 623.4987182617188 257.251220703125 C 626.18603515625 263.1063537597656 641.4287109375 315.3603515625 627.3999633789062 312.5546264648438 C 625.5623168945312 312.1857299804688 624.1627197265625 310.7258605957031 622.9555053710938 309.2927856445312 C 611.6363525390625 295.8721618652344 613.0537109375 278.293212890625 612.038818359375 261.7605285644531 L 611.336669921875 255.3196105957031 C 611.336669921875 255.3196105957031 604.211669921875 248.9703369140625 602.318115234375 241.5702819824219 L 607.2656860351562 222.8310241699219 Z">
+								</path>
+							</svg>
+							<svg class="Path_358_g" viewBox="600.952 226.809 17.477 20.449">
+								<linearGradient id="Path_358_g" spreadMethod="pad" x1="63.917" x2="63.556" y1="-69.623" y2="-70.778">
+									<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+									<stop offset="0.3861" stop-color="#ffcfbe" stop-opacity="1"></stop>
+									<stop offset="0.5877" stop-color="#ffc8b6" stop-opacity="1"></stop>
+									<stop offset="0.7467" stop-color="#ffbda9" stop-opacity="1"></stop>
+									<stop offset="0.8825" stop-color="#ffad96" stop-opacity="1"></stop>
+									<stop offset="1" stop-color="#ff9a7f" stop-opacity="1"></stop>
+								</linearGradient>
+								<path fill="url(#Path_358_g)" id="Path_358_g" d="M 617.0220947265625 235.8655242919922 C 617.0220947265625 235.8655242919922 615.2290649414062 236.9519805908203 612.5528564453125 234.7230529785156 C 609.8746337890625 232.4941711425781 603.4739990234375 227.3923797607422 603.4739990234375 227.3923797607422 C 603.4739990234375 227.3923797607422 600.9186401367188 226.0845031738281 600.9521484375 227.3856506347656 C 600.9856567382812 228.6845397949219 601.4238891601562 231.6826019287109 605.405517578125 234.8326263427734 C 605.405517578125 234.8326263427734 608.7522583007812 237.6897888183594 609.2151489257812 239.1765289306641 C 609.68017578125 240.6654357910156 611.0014038085938 244.6046447753906 614.9629516601562 247.2584075927734 C 614.9629516601562 247.2584075927734 621.1200561523438 241.349609375 617.0220947265625 235.8655242919922 Z">
+								</path>
+							</svg>
+						</div>
+						<div id="Group_178">
+							<svg class="Path_359_j" viewBox="610.68 243.4 57.916 43.847">
+								<linearGradient id="Path_359_j" spreadMethod="pad" x1="-149.009" x2="-149.134" y1="-132.533" y2="-131.036">
+									<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+									<stop offset="0.3861" stop-color="#ffcfbe" stop-opacity="1"></stop>
+									<stop offset="0.5877" stop-color="#ffc8b6" stop-opacity="1"></stop>
+									<stop offset="0.7467" stop-color="#ffbda9" stop-opacity="1"></stop>
+									<stop offset="0.8825" stop-color="#ffad96" stop-opacity="1"></stop>
+									<stop offset="1" stop-color="#ff9a7f" stop-opacity="1"></stop>
+								</linearGradient>
+								<path fill="url(#Path_359_j)" id="Path_359_j" d="M 618.5162353515625 287.240966796875 C 621.2705078125 287.3572082519531 623.9868774414062 285.7944946289062 626.7703247070312 284.0260314941406 C 633.5487060546875 279.72021484375 640.3853759765625 275.5239562988281 647.2042236328125 271.2940063476562 C 650.240234375 269.4115905761719 653.2760620117188 267.524658203125 656.2943725585938 265.6065063476562 C 662.4581298828125 261.6896362304688 671.583984375 256.0513305664062 667.6380615234375 247.1802368164062 C 666.7393798828125 245.1592102050781 663.823974609375 243.7373046875 661.8320922851562 243.4601135253906 C 660.33642578125 243.2499389648438 658.7020874023438 243.6098937988281 657.041015625 244.2761535644531 C 653.5132446289062 245.6912841796875 649.8533935546875 248.4858703613281 647.0923461914062 250.1559143066406 C 641.4227294921875 253.5853576660156 635.8046264648438 257.1244201660156 630.2891845703125 260.8400573730469 C 626.7457275390625 263.2255249023438 623.2266235351562 265.6623840332031 619.819580078125 268.2692260742188 C 617.0138549804688 270.4154052734375 613.2692260742188 272.8321533203125 611.458251953125 276.0313415527344 C 609.5266723632812 279.4429626464844 611.4962158203125 283.2615356445312 614.0270385742188 285.3674621582031 C 615.5451049804688 286.6283569335938 617.0361938476562 287.1760864257812 618.5162353515625 287.240966796875 Z">
+								</path>
+							</svg>
+						</div>
+						<svg class="Path_360_l" viewBox="624.737 239.523 36.84 36.622">
+							<linearGradient id="Path_360_l" spreadMethod="pad" x1="116.681" x2="115.686" y1="394.787" y2="394.839">
+								<stop offset="0" stop-color="#e3ebfd" stop-opacity="1"></stop>
+								<stop offset="0.9973" stop-color="#8f8bff" stop-opacity="1"></stop>
+							</linearGradient>
+							<path fill="url(#Path_360_l)" id="Path_360_l" d="M 640.1898193359375 276.1451721191406 C 647.6234130859375 269.4717102050781 666.9527587890625 256.3126525878906 660.1497802734375 243.7862243652344 C 652.6224365234375 229.9274444580078 624.737060546875 254.2938690185547 624.737060546875 254.2938690185547 L 640.1898193359375 276.1451721191406 Z">
+							</path>
+						</svg>
+					</div>
+					<svg class="Path_361_n" viewBox="625.238 268.411 49.294 118.61">
+						<linearGradient id="Path_361_n" spreadMethod="pad" x1="-149.322" x2="-149.322" y1="0" y2="1">
+							<stop offset="0" stop-color="#071786" stop-opacity="1"></stop>
+							<stop offset="0.1509" stop-color="#05136b" stop-opacity="1"></stop>
+							<stop offset="0.3236" stop-color="#031054" stop-opacity="1"></stop>
+							<stop offset="0.5107" stop-color="#020d44" stop-opacity="1"></stop>
+							<stop offset="0.7204" stop-color="#020c3b" stop-opacity="1"></stop>
+							<stop offset="1" stop-color="#020c38" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_361_n)" id="Path_361_n" d="M 631.6817626953125 386.6949157714844 C 627.3602905273438 370.15771484375 625.5158081054688 345.3844604492188 625.2409057617188 328.3689270019531 C 625.1044311523438 319.9158630371094 629.3634643554688 288.9900512695312 629.839599609375 280.5369567871094 C 630.7383422851562 264.5386352539062 634.0538330078125 267.5970764160156 653.1373901367188 271.668212890625 C 655.5518798828125 272.1846313476562 657.8389892578125 273.1683044433594 659.8756103515625 274.5610961914062 C 683.866455078125 290.9462280273438 672.6747436523438 328.4918518066406 666.1846313476562 349.6612548828125 C 663.3656005859375 358.85205078125 659.748291015625 369.7463684082031 656.356689453125 378.7471313476562 C 644.029296875 389.4872131347656 631.6817626953125 386.6949157714844 631.6817626953125 386.6949157714844 Z">
+						</path>
+					</svg>
+					<div id="Group_180">
+						<svg class="Path_362_q" viewBox="645.816 344.129 51.276 68.573">
+							<linearGradient id="Path_362_q" spreadMethod="pad" x1="-154.46" x2="-154.563" y1="13.424" y2="12.697">
+								<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+								<stop offset="0.3861" stop-color="#ffcfbe" stop-opacity="1"></stop>
+								<stop offset="0.5877" stop-color="#ffc8b6" stop-opacity="1"></stop>
+								<stop offset="0.7467" stop-color="#ffbda9" stop-opacity="1"></stop>
+								<stop offset="0.8825" stop-color="#ffad96" stop-opacity="1"></stop>
+								<stop offset="1" stop-color="#ff9a7f" stop-opacity="1"></stop>
+							</linearGradient>
+							<path fill="url(#Path_362_q)" id="Path_362_q" d="M 690.4531860351562 368.7615356445312 C 689.449462890625 367.7465209960938 688.0989990234375 367.0020141601562 686.86279296875 366.2196350097656 C 686.5140380859375 365.9959716796875 683.2879638671875 363.6664428710938 683.0128784179688 363.3332824707031 C 679.0155639648438 358.5155029296875 669.3866577148438 344.1290283203125 669.3866577148438 344.1290283203125 L 655.5345458984375 354.4622802734375 C 655.5345458984375 354.4622802734375 666.59423828125 364.835693359375 670.014892578125 373.29541015625 L 670.0326538085938 373.2842712402344 C 666.549560546875 381.2967834472656 659.17626953125 394.0914611816406 659.17626953125 394.0914611816406 C 659.17626953125 394.0914611816406 648.4652709960938 405.4620056152344 648.0361328125 406.2333068847656 C 647.6068115234375 407.0046081542969 646.3482666015625 408.6589965820312 645.8160400390625 411.7308654785156 C 645.8160400390625 411.7308654785156 646.8109130859375 415.9874572753906 663.9473266601562 406.6804809570312 C 663.9473266601562 406.6804809570312 671.6781616210938 403.0743408203125 681.0008544921875 393.2866516113281 C 683.1426391601562 391.3281860351562 685.2842407226562 389.3675842285156 687.426025390625 387.4091491699219 C 689.6259765625 385.3970336914062 696.5318603515625 379.7453308105469 696.93212890625 378.3547058105469 C 697.08642578125 377.818115234375 697.1221313476562 377.3642883300781 697.0685424804688 376.9574279785156 C 696.655029296875 373.8476257324219 692.54345703125 370.8697509765625 690.4531860351562 368.7615356445312 Z">
+							</path>
+						</svg>
+						<svg class="Path_363_s" viewBox="645.816 354.031 51.276 46.436">
+							<linearGradient id="Path_363_s" spreadMethod="pad" x1="-155.076" x2="-153.875" y1="19.093" y2="19.093">
+								<stop offset="0" stop-color="#071786" stop-opacity="1"></stop>
+								<stop offset="0.1509" stop-color="#05136b" stop-opacity="1"></stop>
+								<stop offset="0.3236" stop-color="#031054" stop-opacity="1"></stop>
+								<stop offset="0.5107" stop-color="#020d44" stop-opacity="1"></stop>
+								<stop offset="0.7204" stop-color="#020c3b" stop-opacity="1"></stop>
+								<stop offset="1" stop-color="#020c38" stop-opacity="1"></stop>
+							</linearGradient>
+							<path fill="url(#Path_363_s)" id="Path_363_s" d="M 686.9387817382812 354.0310668945312 C 683.8826293945312 357.2391967773438 679.9656372070312 359.90185546875 676.56982421875 361.882568359375 C 674.1419677734375 363.2999877929688 671.1617431640625 364.5497436523438 668.1570434570312 365.0908203125 C 664.42333984375 372.7501831054688 659.17626953125 381.85595703125 659.17626953125 381.85595703125 C 659.17626953125 381.85595703125 648.4652709960938 393.2265014648438 648.0361328125 393.997802734375 C 647.6068115234375 394.7691040039062 646.3482666015625 396.4235229492188 645.8160400390625 399.495361328125 C 645.8160400390625 399.495361328125 646.8109130859375 403.7520141601562 663.9473266601562 394.4450073242188 C 663.9473266601562 394.4450073242188 671.6781616210938 390.8388671875 681.0008544921875 381.0511474609375 C 683.1426391601562 379.0927124023438 685.2842407226562 377.132080078125 687.426025390625 375.1736450195312 C 689.6259765625 373.1615600585938 696.5318603515625 367.5098266601562 696.93212890625 366.1192016601562 C 697.08642578125 365.5826416015625 697.1221313476562 365.1287841796875 697.0685424804688 364.721923828125 C 696.655029296875 361.6121215820312 692.54345703125 358.6342163085938 690.4531860351562 356.5260620117188 C 689.469482421875 355.5311279296875 688.1526489257812 354.7955932617188 686.9387817382812 354.0310668945312 Z">
+							</path>
+						</svg>
+						<svg class="Path_364_u" viewBox="627.955 313.802 73.587 91.067">
+							<linearGradient id="Path_364_u" spreadMethod="pad" x1="-106.943" x2="-107.084" y1="10.455" y2="9.38">
+								<stop offset="0" stop-color="#071786" stop-opacity="1"></stop>
+								<stop offset="0.1509" stop-color="#05136b" stop-opacity="1"></stop>
+								<stop offset="0.3236" stop-color="#031054" stop-opacity="1"></stop>
+								<stop offset="0.5107" stop-color="#020d44" stop-opacity="1"></stop>
+								<stop offset="0.7204" stop-color="#020c3b" stop-opacity="1"></stop>
+								<stop offset="1" stop-color="#020c38" stop-opacity="1"></stop>
+							</linearGradient>
+							<path fill="url(#Path_364_u)" id="Path_364_u" d="M 701.5418701171875 389.5283508300781 C 691.90625 371.3636169433594 670.9490966796875 336.05810546875 650.8751220703125 314.6897583007812 C 648.000244140625 311.6313781738281 637.8324584960938 317.2808837890625 634.03173828125 319.4784851074219 C 631.0987548828125 321.1776428222656 627.9083862304688 325.2152404785156 627.955322265625 328.765380859375 C 627.99560546875 331.6986694335938 632.2052612304688 338.4793090820312 633.93115234375 340.6502075195312 C 638.818359375 346.8026428222656 667.796875 386.802978515625 683.214111328125 404.8694152832031 L 701.5418701171875 389.5283508300781 Z">
+							</path>
+						</svg>
+					</div>
+					<svg class="Path_365_w" viewBox="611.503 278.964 82.08 99.897">
+						<linearGradient id="Path_365_w" spreadMethod="pad" x1="-89.477" x2="-89.477" y1="0" y2="1.218">
+							<stop offset="0" stop-color="#071786" stop-opacity="1"></stop>
+							<stop offset="0.1509" stop-color="#05136b" stop-opacity="1"></stop>
+							<stop offset="0.3236" stop-color="#031054" stop-opacity="1"></stop>
+							<stop offset="0.5107" stop-color="#020d44" stop-opacity="1"></stop>
+							<stop offset="0.7204" stop-color="#020c3b" stop-opacity="1"></stop>
+							<stop offset="1" stop-color="#020c38" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_365_w)" id="Path_365_w" d="M 630.5306396484375 278.9640197753906 L 667.602294921875 278.9640197753906 C 667.6492309570312 279.0422668457031 667.7073364257812 279.1182861328125 667.7520751953125 279.1987915039062 L 667.7901000976562 278.9640197753906 L 693.5425415039062 278.9640197753906 L 693.582763671875 278.9998474121094 C 682.956787109375 283.76171875 684.0186767578125 287.0816955566406 684.0186767578125 287.0816955566406 C 680.3365478515625 303.5718994140625 669.2052612304688 323.7509765625 662.2344970703125 325.4969482421875 C 658.2862548828125 333.5430908203125 655.4760131835938 342.0564575195312 652.0689697265625 348.1083984375 C 647.351806640625 356.4876708984375 641.541259765625 367.7888793945312 636.3076782226562 375.8572387695312 C 621.968017578125 383.7156372070312 611.587890625 373.668701171875 611.587890625 373.668701171875 C 610.8992919921875 356.5882568359375 614.5255126953125 334.82861328125 617.8925170898438 318.1461181640625 C 619.2538452148438 311.3988647460938 626.6114501953125 290.8040771484375 630.5306396484375 278.9640197753906 Z">
+						</path>
+					</svg>
+					<div id="Group_181">
+						<svg class="Path_366_z" viewBox="593.653 354.853 62.576 47">
+							<linearGradient id="Path_366_z" spreadMethod="pad" x1="-117.521" x2="-117.521" y1="1" y2="0">
+								<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+								<stop offset="0.3861" stop-color="#ffcfbe" stop-opacity="1"></stop>
+								<stop offset="0.5877" stop-color="#ffc8b6" stop-opacity="1"></stop>
+								<stop offset="0.7467" stop-color="#ffbda9" stop-opacity="1"></stop>
+								<stop offset="0.8825" stop-color="#ffad96" stop-opacity="1"></stop>
+								<stop offset="1" stop-color="#ff9a7f" stop-opacity="1"></stop>
+							</linearGradient>
+							<path fill="url(#Path_366_z)" id="Path_366_z" d="M 655.396728515625 387.8177490234375 C 655.2447509765625 386.3982238769531 654.654541015625 384.9740295410156 654.17822265625 383.5924072265625 C 654.044189453125 383.198974609375 652.977783203125 379.3647766113281 652.9688720703125 378.9355163574219 C 652.8524169921875 372.6734924316406 654.3057861328125 355.4253845214844 654.3057861328125 355.4253845214844 L 637.0352783203125 354.8530578613281 C 637.0352783203125 354.8530578613281 639.203857421875 369.861083984375 636.59716796875 378.6069030761719 L 636.619384765625 378.6091613769531 C 628.895263671875 382.6959228515625 615.150390625 388.0928039550781 615.150390625 388.0928039550781 C 615.150390625 388.0928039550781 599.6842041015625 390.294921875 598.8682861328125 390.6280212402344 C 598.0520629882812 390.9634094238281 596.03564453125 391.4708251953125 593.7037353515625 393.5388488769531 C 593.7037353515625 393.5388488769531 591.8258056640625 397.4847412109375 611.021240234375 400.9053344726562 C 611.021240234375 400.9053344726562 619.313232421875 402.9129638671875 632.7047119140625 401.0841979980469 C 635.60009765625 400.8896789550781 638.497314453125 400.6951904296875 641.394775390625 400.5006713867188 C 644.368408203125 400.3017272949219 653.2930908203125 400.1943969726562 654.473388671875 399.3583068847656 C 654.929443359375 399.0340270996094 655.240234375 398.7009582519531 655.4503173828125 398.3499145507812 C 657.06884765625 395.6627197265625 655.7142333984375 390.7710876464844 655.396728515625 387.8177490234375 Z">
+							</path>
+						</svg>
+						<svg class="Path_367" viewBox="614.825 354.968 1.88 2.864">
+							<path fill="rgba(255,217,182,1)" id="Path_367" d="M 614.8250122070312 354.9680480957031 C 615.1491088867188 355.9092712402344 615.4354248046875 356.8660583496094 615.685791015625 357.8318786621094 C 616.0413208007812 356.9063415527344 616.3809814453125 355.9695739746094 616.705322265625 355.0306396484375 L 614.8250122070312 354.9680480957031 Z">
+							</path>
+						</svg>
+						<svg class="Path_368_" viewBox="593.653 366.45 62.576 21.073">
+							<linearGradient id="Path_368_" spreadMethod="pad" x1="-118.021" x2="-117.021" y1="0.5" y2="0.5">
+								<stop offset="0" stop-color="#071786" stop-opacity="1"></stop>
+								<stop offset="0.1509" stop-color="#05136b" stop-opacity="1"></stop>
+								<stop offset="0.3236" stop-color="#031054" stop-opacity="1"></stop>
+								<stop offset="0.5107" stop-color="#020d44" stop-opacity="1"></stop>
+								<stop offset="0.7204" stop-color="#020c3b" stop-opacity="1"></stop>
+								<stop offset="1" stop-color="#020c38" stop-opacity="1"></stop>
+							</linearGradient>
+							<path fill="url(#Path_368_)" id="Path_368_" d="M 654.17822265625 369.2625122070312 C 654.0999755859375 369.034423828125 653.7110595703125 367.6550903320312 653.395751953125 366.4500122070312 C 652.7274169921875 366.7943115234375 652.06787109375 367.1207275390625 651.42626953125 367.4269409179688 C 643.9859619140625 370.9749755859375 636.0291748046875 370.4362182617188 628.195556640625 368.6074829101562 C 628.0480346679688 368.5738525390625 627.909423828125 368.5314331054688 627.7728271484375 368.4866943359375 C 621.356689453125 371.3259887695312 615.150390625 373.7628784179688 615.150390625 373.7628784179688 C 615.150390625 373.7628784179688 599.6842041015625 375.9649658203125 598.8682861328125 376.298095703125 C 598.0520629882812 376.6334838867188 596.03564453125 377.1409301757812 593.7037353515625 379.2089233398438 C 593.7037353515625 379.2089233398438 591.8258056640625 383.1548461914062 611.021240234375 386.5753784179688 C 611.021240234375 386.5753784179688 619.313232421875 388.5830078125 632.7047119140625 386.7542724609375 C 635.60009765625 386.5597534179688 638.497314453125 386.365234375 641.394775390625 386.1707153320312 C 644.368408203125 385.9718017578125 653.2930908203125 385.8644409179688 654.473388671875 385.0283813476562 C 654.929443359375 384.7041015625 655.240234375 384.3710327148438 655.4503173828125 384.02001953125 C 657.06884765625 381.332763671875 655.7142333984375 376.441162109375 655.396728515625 373.4878540039062 C 655.2447509765625 372.0682373046875 654.654541015625 370.6441040039062 654.17822265625 369.2625122070312 Z">
+							</path>
+						</svg>
+						<svg class="Path_369_" viewBox="611.533 316.076 28.451 95.595">
+							<linearGradient id="Path_369_" spreadMethod="pad" x1="-259.08" x2="-259.08" y1="1" y2="0">
+								<stop offset="0" stop-color="#071786" stop-opacity="1"></stop>
+								<stop offset="0.1509" stop-color="#05136b" stop-opacity="1"></stop>
+								<stop offset="0.3236" stop-color="#031054" stop-opacity="1"></stop>
+								<stop offset="0.5107" stop-color="#020d44" stop-opacity="1"></stop>
+								<stop offset="0.7204" stop-color="#020c3b" stop-opacity="1"></stop>
+								<stop offset="1" stop-color="#020c38" stop-opacity="1"></stop>
+							</linearGradient>
+							<path fill="url(#Path_369_)" id="Path_369_" d="M 637.167236328125 411.670654296875 C 637.5650634765625 387.8162536621094 639.6464233398438 374.9970092773438 639.9527587890625 356.5349731445312 C 640.0601196289062 349.9621276855469 639.9058837890625 343.3736267089844 639.2575073242188 336.8298950195312 C 638.604736328125 330.2436218261719 636.8451538085938 320.7532348632812 629.865478515625 317.4154052734375 C 625.7830810546875 315.4637451171875 620.1246948242188 315.658203125 616.1720581054688 317.9095458984375 C 612.3358154296875 320.0936889648438 611.5443115234375 324.6343688964844 611.5330810546875 328.6897888183594 C 611.5153198242188 336.5481567382812 613.1137084960938 386.7833557128906 613.8851318359375 410.5216064453125 L 637.167236328125 411.670654296875 Z">
+							</path>
+						</svg>
+					</div>
+					<svg class="Path_370_" viewBox="618.578 226.574 5.805 11.515">
+						<linearGradient id="Path_370_" spreadMethod="pad" x1="-1270.998" x2="-1272.072" y1="0.75" y2="0.437">
+							<stop offset="0" stop-color="#e2b691" stop-opacity="1"></stop>
+							<stop offset="1" stop-color="#ef9367" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_370_)" id="Path_370_" d="M 621.8795166015625 226.5744781494141 L 624.38330078125 236.6471710205078 L 618.5780029296875 238.0898590087891 L 621.8795166015625 226.5744781494141 Z">
+						</path>
+					</svg>
+					<svg class="Path_371_" viewBox="627.102 226.471 18.851 35.005">
+						<linearGradient id="Path_371_" spreadMethod="pad" x1="-390.637" x2="-391.757" y1="0.682" y2="0.334">
+							<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+							<stop offset="0.3861" stop-color="#ffcfbe" stop-opacity="1"></stop>
+							<stop offset="0.5877" stop-color="#ffc8b6" stop-opacity="1"></stop>
+							<stop offset="0.7467" stop-color="#ffbda9" stop-opacity="1"></stop>
+							<stop offset="0.8825" stop-color="#ffad96" stop-opacity="1"></stop>
+							<stop offset="1" stop-color="#ff9a7f" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_371_)" id="Path_371_" d="M 627.8017578125 237.41455078125 C 627.7393188476562 240.6338958740234 627.10205078125 259.5654602050781 627.10205078125 259.5654602050781 C 629.0470581054688 261.7698059082031 638.4725341796875 262.5679321289062 642.4520874023438 259.2009887695312 C 645.6200561523438 256.5249938964844 645.9530639648438 254.1194000244141 645.9530639648438 254.1194000244141 L 644.7904663085938 226.4710388183594 L 627.8017578125 237.41455078125 Z">
+						</path>
+					</svg>
+					<svg class="Path_372_a" viewBox="618.729 217.1 38.073 44.488">
+						<linearGradient id="Path_372_a" spreadMethod="pad" x1="-192.995" x2="-194.018" y1="0.682" y2="0.177">
+							<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+							<stop offset="0.3861" stop-color="#ffcfbe" stop-opacity="1"></stop>
+							<stop offset="0.5877" stop-color="#ffc8b6" stop-opacity="1"></stop>
+							<stop offset="0.7467" stop-color="#ffbda9" stop-opacity="1"></stop>
+							<stop offset="0.8825" stop-color="#ffad96" stop-opacity="1"></stop>
+							<stop offset="1" stop-color="#ff9a7f" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_372_a)" id="Path_372_a" d="M 653.7415771484375 217.1000213623047 L 654.7789916992188 226.9570007324219 L 656.357421875 241.9917602539062 L 656.8021850585938 246.2216796875 C 647.2156982421875 262.5263366699219 631.34033203125 264.25 626.191650390625 258.80615234375 C 621.0452270507812 253.3623809814453 618.72900390625 222.2710571289062 618.72900390625 222.2710571289062 L 653.7415771484375 217.1000213623047 Z">
+						</path>
+					</svg>
+					<svg class="Path_373_c" viewBox="613.437 212.621 58.565 53.193">
+						<linearGradient id="Path_373_c" spreadMethod="pad" x1="183.866" x2="184.866" y1="0.5" y2="0.5">
+							<stop offset="0" stop-color="#071786" stop-opacity="1"></stop>
+							<stop offset="0.1509" stop-color="#05136b" stop-opacity="1"></stop>
+							<stop offset="0.3236" stop-color="#031054" stop-opacity="1"></stop>
+							<stop offset="0.5107" stop-color="#020d44" stop-opacity="1"></stop>
+							<stop offset="0.7204" stop-color="#020c3b" stop-opacity="1"></stop>
+							<stop offset="1" stop-color="#020c38" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_373_c)" id="Path_373_c" d="M 655.958984375 265.8139953613281 C 655.958984375 265.8139953613281 643.859619140625 240.280517578125 640.0991821289062 238.1544799804688 C 636.3388671875 236.0305633544922 623.7521362304688 239.0241546630859 617.049560546875 228.9994506835938 C 610.4320678710938 219.106689453125 614.4338989257812 213.9602203369141 617.049560546875 213.4683380126953 C 619.665283203125 212.978759765625 624.5569458007812 222.6859588623047 633.2334594726562 216.9023132324219 C 642.0621948242188 211.0158538818359 660.0703735351562 211.0158538818359 662.8380126953125 218.0469818115234 C 662.8380126953125 218.0469818115234 674.105712890625 219.1916351318359 671.6532592773438 234.5595397949219 C 669.2008056640625 249.9252166748047 664.9508056640625 262.8405456542969 661.1903076171875 263.9851989746094 L 655.958984375 265.8139953613281 Z">
+						</path>
+					</svg>
+					<svg class="Path_374_e" viewBox="626.106 223.612 9.36 17.931">
+						<linearGradient id="Path_374_e" spreadMethod="pad" x1="-788.128" x2="-789.218" y1="0.64" y2="0.311">
+							<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+							<stop offset="0.3861" stop-color="#ffcfbe" stop-opacity="1"></stop>
+							<stop offset="0.5877" stop-color="#ffc8b6" stop-opacity="1"></stop>
+							<stop offset="0.7467" stop-color="#ffbda9" stop-opacity="1"></stop>
+							<stop offset="0.8825" stop-color="#ffad96" stop-opacity="1"></stop>
+							<stop offset="1" stop-color="#ff9a7f" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_374_e)" id="Path_374_e" d="M 632.9605712890625 224.4499816894531 C 636.8416748046875 227.5687561035156 636.671630859375 236.5762023925781 629.177734375 241.5438232421875 L 626.1060791015625 226.7593994140625 C 626.5084838867188 224.4790344238281 630.4052124023438 222.39990234375 632.9605712890625 224.4499816894531 Z">
+						</path>
+					</svg>
+					<svg class="Path_375_g" viewBox="613.781 238.682 77.982 121.253">
+						<linearGradient id="Path_375_g" spreadMethod="pad" x1="1.13" x2="0.203" y1="0.403" y2="0.598">
+							<stop offset="0" stop-color="#e3ebfd" stop-opacity="1"></stop>
+							<stop offset="0.9973" stop-color="#8f8bff" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_375_g)" id="Path_375_g" d="M 660.6851806640625 238.7083282470703 C 649.95849609375 239.4147644042969 633.4503173828125 241.8963165283203 629.4374389648438 253.9398651123047 C 627.2979736328125 260.356201171875 626.9982299804688 267.3694763183594 627.6756591796875 274.0607299804688 C 628.2078247070312 279.3078308105469 628.6593017578125 284.5616455078125 628.876220703125 289.84228515625 C 629.2429809570312 298.7535705566406 629.7280883789062 308.7984008789062 626.6473388671875 317.3341064453125 L 613.7811279296875 351.8213195800781 C 613.7811279296875 351.8213195800781 657.6647338867188 366.9902648925781 691.762939453125 355.8477478027344 C 691.762939453125 355.8477478027344 689.3909912109375 276.8262939453125 681.9014892578125 258.2322998046875 C 679.0130004882812 251.0602874755859 671.0942993164062 238.0242309570312 660.6851806640625 238.7083282470703 Z">
+						</path>
+					</svg>
+				</div>
+				<div id="Group_183">
+					<svg class="Path_376_j" viewBox="482.622 208.613 298.535 373.908">
+						<linearGradient id="Path_376_j" spreadMethod="pad" x1="-4.423" x2="-2.948" y1="0.371" y2="0.371">
+							<stop offset="0" stop-color="#074fc0" stop-opacity="1"></stop>
+							<stop offset="0.1616" stop-color="#06319d" stop-opacity="1"></stop>
+							<stop offset="0.2876" stop-color="#061f88" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_376_j)" id="Path_376_j" d="M 563.0494995117188 428.5408630371094 C 553.997314453125 442.69482421875 556.5661010742188 461.3290405273438 569.1126708984375 472.5028076171875 L 584.9545288085938 486.6120300292969 C 593.2308959960938 493.9829711914062 594.6281127929688 506.4020080566406 588.2006225585938 515.4274291992188 L 546.89697265625 573.42919921875 C 538.9178466796875 584.6343383789062 522.7474975585938 585.6203002929688 513.3016967773438 575.6201782226562 C 503.2568359375 564.9874267578125 494.2315368652344 550.0890502929688 486.0714721679688 524.0704956054688 C 470.7393493652344 475.1856689453125 507.987548828125 430.5819702148438 568.7437133789062 345.2671813964844 C 629.4998779296875 259.9523010253906 659.4285278320312 210.2179565429688 710.6385498046875 208.7200927734375 C 738.3875122070312 207.9085693359375 755.4812622070312 211.7874145507812 768.8975830078125 218.0360717773438 C 781.07275390625 223.7056884765625 784.8958129882812 239.2188720703125 777.1045532226562 250.1624145507812 L 735.7785034179688 308.1932678222656 C 729.3508911132812 317.2185974121094 717.1577758789062 319.9595336914062 707.486328125 314.5492553710938 L 688.9705810546875 304.1914672851562 C 674.3069458007812 295.9911499023438 655.8582153320312 299.6553039550781 645.4447021484375 312.8390197753906 L 563.0494995117188 428.5408630371094 Z">
+						</path>
+					</svg>
+					<svg class="Path_377_l" viewBox="510.579 245.608 160.118 194.151">
+						<linearGradient id="Path_377_l" spreadMethod="pad" x1="-7.258" x2="-7.248" y1="0.242" y2="-0.243">
+							<stop offset="0" stop-color="#074fc0" stop-opacity="1"></stop>
+							<stop offset="0.1616" stop-color="#06319d" stop-opacity="1"></stop>
+							<stop offset="0.2876" stop-color="#061f88" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_377_l)" id="Path_377_l" d="M 597.6781005859375 259.2300415039062 C 582.3570556640625 280.9606018066406 557.3200073242188 316.4673461914062 557.3200073242188 316.4673461914062 C 557.3200073242188 316.4673461914062 532.2850341796875 351.9739685058594 516.9639892578125 373.70458984375 C 501.6431579589844 395.4350891113281 514.4871215820312 415.3346862792969 549.1285400390625 439.7592468261719 L 534.567626953125 426.7901916503906 C 522.0211181640625 415.6164245605469 519.4523315429688 396.9822082519531 528.5045166015625 382.8282165527344 L 610.899658203125 267.1263732910156 C 621.313232421875 253.9426574707031 639.7640991210938 250.2785339355469 654.4256591796875 258.4788818359375 L 670.5759887695312 267.51318359375 L 670.6966552734375 267.3387756347656 C 636.0551147460938 242.9142456054688 612.9989624023438 237.49951171875 597.6781005859375 259.2300415039062 Z">
+						</path>
+					</svg>
+				</div>
+				<svg class="Path_378_n" viewBox="598.076 227.153 3.722 14.645">
+					<linearGradient id="Path_378_n" spreadMethod="pad" x1="1.625" x2="0.599" y1="0.114" y2="0.491">
+						<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+						<stop offset="0.3861" stop-color="#ffcfbe" stop-opacity="1"></stop>
+						<stop offset="0.5877" stop-color="#ffc8b6" stop-opacity="1"></stop>
+						<stop offset="0.7467" stop-color="#ffbda9" stop-opacity="1"></stop>
+						<stop offset="0.8825" stop-color="#ffad96" stop-opacity="1"></stop>
+						<stop offset="1" stop-color="#ff9a7f" stop-opacity="1"></stop>
+					</linearGradient>
+					<path fill="url(#Path_378_n)" id="Path_378_n" d="M 598.0760498046875 234.1303558349609 C 598.0760498046875 234.1303558349609 598.1229858398438 227.3518218994141 600.7163696289062 227.1550750732422 C 603.3120727539062 226.9583435058594 600.4190673828125 241.7986145019531 600.4190673828125 241.7986145019531 L 598.0760498046875 234.1303558349609 Z">
+					</path>
+				</svg>
+				<div id="Group_184">
+					<svg class="Path_379_q" viewBox="591.79 223.593 25.251 91.993">
+						<linearGradient id="Path_379_q" spreadMethod="pad" x1="41.795" x2="41.094" y1="-14.616" y2="-13.901">
+							<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+							<stop offset="0.3861" stop-color="#ffcfbe" stop-opacity="1"></stop>
+							<stop offset="0.5877" stop-color="#ffc8b6" stop-opacity="1"></stop>
+							<stop offset="0.7467" stop-color="#ffbda9" stop-opacity="1"></stop>
+							<stop offset="0.8825" stop-color="#ffad96" stop-opacity="1"></stop>
+							<stop offset="1" stop-color="#ff9a7f" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_379_q)" id="Path_379_q" d="M 596.831298828125 224.4788818359375 C 597.233642578125 223.5309600830078 598.4609985351562 223.2895050048828 599.1876831054688 224.0183410644531 C 601.396484375 226.2383575439453 606.0018920898438 232.4065551757812 607.5847778320312 237.9196624755859 C 609.8294067382812 245.7466735839844 608.5527954101562 252.2055053710938 611.2735595703125 259.9385986328125 C 613.410888671875 266.01513671875 623.77978515625 319.4518127441406 610.068603515625 315.3627319335938 C 608.2711181640625 314.8284606933594 607.012451171875 313.2455749511719 605.941650390625 311.70751953125 C 595.9080200195312 297.3009033203125 598.93505859375 279.9299011230469 599.4493408203125 263.3726196289062 L 599.342041015625 256.8936767578125 C 599.342041015625 256.8936767578125 598.3045043945312 251.5280914306641 595.0003051757812 246.1982727050781 C 594.8192138671875 245.9054260253906 592.2504272460938 235.7421112060547 591.81005859375 233.1152648925781 C 591.7630615234375 232.8402862548828 591.8010864257812 232.5719299316406 591.9105834960938 232.3148803710938 L 596.831298828125 224.4788818359375 Z">
+						</path>
+					</svg>
+				</div>
+				<div id="Group_185">
+					<svg class="Path_380_t" viewBox="597.664 245.476 57.916 43.847">
+						<linearGradient id="Path_380_t" spreadMethod="pad" x1="-148.805" x2="-148.93" y1="-132.095" y2="-130.598">
+							<stop offset="0" stop-color="#ffd1c1" stop-opacity="1"></stop>
+							<stop offset="0.3861" stop-color="#ffcfbe" stop-opacity="1"></stop>
+							<stop offset="0.5877" stop-color="#ffc8b6" stop-opacity="1"></stop>
+							<stop offset="0.7467" stop-color="#ffbda9" stop-opacity="1"></stop>
+							<stop offset="0.8825" stop-color="#ffad96" stop-opacity="1"></stop>
+							<stop offset="1" stop-color="#ff9a7f" stop-opacity="1"></stop>
+						</linearGradient>
+						<path fill="url(#Path_380_t)" id="Path_380_t" d="M 605.5001831054688 289.3169555664062 C 608.2544555664062 289.4331970214844 610.9708251953125 287.8704528808594 613.7542724609375 286.1021118164062 C 620.5326538085938 281.7961730957031 627.3692626953125 277.5999145507812 634.1880493164062 273.3700256347656 C 637.22412109375 271.4875793457031 640.260009765625 269.6006774902344 643.2783203125 267.6825256347656 C 649.4395751953125 263.7656555175781 658.56787109375 258.1272888183594 654.6218872070312 249.2562866210938 C 653.7232666015625 247.2374877929688 650.8079833984375 245.8156127929688 648.8159790039062 245.5361328125 C 647.3203125 245.3259887695312 645.6859741210938 245.6859130859375 644.02490234375 246.3521118164062 C 640.4970703125 247.767333984375 636.8372192382812 250.5618896484375 634.0762329101562 252.2319641113281 C 628.4066162109375 255.661376953125 622.7883911132812 259.200439453125 617.2730712890625 262.9161071777344 C 613.7295532226562 265.301513671875 610.2105712890625 267.7384033203125 606.8035278320312 270.3451843261719 C 603.9978637695312 272.4914245605469 600.2531127929688 274.9081115722656 598.4421997070312 278.1073608398438 C 596.5106201171875 281.5211791992188 598.4801025390625 285.3374938964844 601.0109252929688 287.4412841796875 C 602.529052734375 288.7044372558594 604.0202026367188 289.2543640136719 605.5001831054688 289.3169555664062 Z">
+						</path>
+					</svg>
+				</div>
+				<svg class="Path_381_v" viewBox="611.721 241.599 36.84 36.622">
+					<linearGradient id="Path_381_v" spreadMethod="pad" x1="-0.049" x2="0.849" y1="-0.556" y2="0.825">
+						<stop offset="0" stop-color="#e3ebfd" stop-opacity="1"></stop>
+						<stop offset="0.9973" stop-color="#8f8bff" stop-opacity="1"></stop>
+					</linearGradient>
+					<path fill="url(#Path_381_v)" id="Path_381_v" d="M 627.173828125 278.2212219238281 C 634.607421875 271.5477294921875 653.9369506835938 258.3886108398438 647.1337280273438 245.8622741699219 C 639.606201171875 232.0034790039062 611.7210693359375 256.3698120117188 611.7210693359375 256.3698120117188 L 627.173828125 278.2212219238281 Z">
+					</path>
+				</svg>
+			</div>
+		</div>
+	</div>
+	<div id="Contact_US_">
+		<svg class="Path_398" viewBox="0 0 607 704">
+			<path fill="rgba(255,255,255,1)" stroke="rgba(112,112,112,1)" stroke-width="0.5px" stroke-linejoin="miter" stroke-linecap="butt" stroke-miterlimit="4" shape-rendering="auto" id="Path_398" d="M 10 0 L 597 0 C 602.5228271484375 0 607 4.477152347564697 607 10 L 607 694 C 607 699.5228271484375 602.5228271484375 704 597 704 L 10 704 C 4.477152347564697 704 0 699.5228271484375 0 694 L 0 10 C 0 4.477152347564697 4.477152347564697 0 10 0 Z">
+			</path>
+		</svg>
+		<div id="Contact_Us">
+			<span>Contact Us</span>
+		</div>
+		<div onclick="application.goToTargetView(event)" id="Submit">
+			<svg class="Path_382" viewBox="0 0 252.796 73">
+				<path fill="rgba(1,114,208,1)" stroke="rgba(1,114,208,1)" stroke-width="1px" stroke-linejoin="miter" stroke-linecap="butt" stroke-miterlimit="4" shape-rendering="auto" id="Path_382" d="M 28.38888740539551 0 L 224.4074096679688 0 C 240.0861511230469 0 252.7962951660156 12.71013736724854 252.7962951660156 28.38888740539551 L 252.7962951660156 44.61111068725586 C 252.7962951660156 60.28985977172852 240.0861511230469 73 224.4074096679688 73 L 28.38888740539551 73 C 12.71013736724854 73 0 60.28985977172852 0 44.61111068725586 L 0 28.38888740539551 C 0 12.71013736724854 12.71013736724854 0 28.38888740539551 0 Z">
+				</path>
+			</svg>
+			<div id="Let_s_Talk">
+				<span>Let’s Talk</span>
+			</div>
+		</div>
+		<div onclick="application.goToTargetView(event)" id="Business">
+			<div id="User">
+				<svg class="Rectangle_77">
+					<rect fill="rgba(247,251,252,1)" id="Rectangle_77" rx="10" ry="10" x="0" y="0" width="215" height="243">
+					</rect>
+				</svg>
+				<div id="Consumer">
+					<span>Consumer</span>
+				</div>
+				<div id="noun_Gentleman_518257">
+					<div id="Group_148">
+						<svg class="Path_108" viewBox="134.5 1.932 42.778 48.069">
+							<path fill="rgba(36,120,202,1)" id="Path_108" d="M 155.8800201416016 50.00069427490234 C 163.4466247558594 50.00069427490234 169.8694458007812 44.26415252685547 172.1570129394531 36.34562301635742 C 175.6235656738281 31.68248558044434 177.2952575683594 26.43865966796875 177.2776794433594 20.66693115234375 C 176.9961242675781 9.246646881103516 166.7900390625 1.451293349266052 155.6512603759766 3.527708530426025 C 151.9911346435547 4.266770839691162 148.3134155273438 3.756465911865234 145.0052642822266 2.172759532928467 C 144.0902099609375 1.732841372489929 142.9991912841797 1.908808827400208 142.2601776123047 2.595081329345703 C 137.3154602050781 7.135040283203125 134.4999847412109 13.82179927825928 134.4999847412109 20.93087768554688 C 134.4999847412109 26.61462593078613 136.3300323486328 32.06961441040039 139.6382293701172 36.38081741333008 C 141.908203125 44.28175354003906 148.3310241699219 50.00069427490234 155.8800201416016 50.00069427490234 Z M 155.8800201416016 45.02081680297852 C 149.1580657958984 45.02081680297852 143.6854858398438 38.29886245727539 143.6854858398438 30.04598808288574 C 143.6854858398438 26.05153465270996 144.9700622558594 22.30343055725098 147.2224273681641 19.50554656982422 C 152.4486694335938 26.73780250549316 159.4169616699219 29.88762092590332 168.0217895507812 28.9022045135498 C 168.0393371582031 29.28933143615723 168.0569763183594 29.65886688232422 168.0569763183594 30.04598808288574 C 168.0745544433594 38.29886245727539 162.6019592285156 45.02081680297852 155.8800201416016 45.02081680297852 Z M 144.5125427246094 7.363797187805176 C 148.3486175537109 8.824324607849121 152.5190277099609 9.22905158996582 156.6366882324219 8.384407997131348 C 164.6607971191406 6.81829833984375 171.9282836914062 12.50204372406006 172.2977905273438 20.68452644348145 C 172.2449951171875 22.00428199768066 172.1217956542969 23.20086097717285 171.9634399414062 24.34464836120605 C 171.4003295898438 23.74636077880859 170.5380859375 23.42961692810059 169.6582946777344 23.60558700561523 C 160.8775024414062 25.38285636901855 154.5602874755859 22.44419860839844 149.7739715576172 14.31450843811035 L 149.7739715576172 14.31450843811035 C 148.9997100830078 13.01234912872314 147.2575988769531 12.69560718536377 146.0786590576172 13.64583206176758 L 146.0786590576172 13.64583206176758 C 143.0167999267578 16.1269702911377 140.7996520996094 19.66391372680664 139.6382293701172 23.65837287902832 C 139.5150756835938 22.76094245910645 139.4447021484375 21.82831192016602 139.4447021484375 20.91328430175781 C 139.4622497558594 15.77503681182861 141.2747344970703 10.91833686828613 144.5125427246094 7.363797187805176 Z">
+							</path>
+						</svg>
+						<svg class="Path_109" viewBox="45.4 303.2 74.135 36.39">
+							<path fill="rgba(36,120,202,1)" id="Path_109" d="M 109.6632614135742 308.0567016601562 C 92.11934661865234 301.5811157226562 72.81571197509766 301.5811157226562 55.27175903320312 308.0567016601562 C 49.35926055908203 310.2387084960938 45.40000152587891 315.9928588867188 45.40000152587891 322.3980712890625 L 45.40000152587891 337.10888671875 C 45.40000152587891 338.4815673828125 46.50859069824219 339.590087890625 47.88113403320312 339.590087890625 L 117.0539016723633 339.590087890625 C 118.4264450073242 339.590087890625 119.535041809082 338.4815673828125 119.535041809082 337.10888671875 L 119.535041809082 322.3980712890625 C 119.535041809082 316.0104370117188 115.5581893920898 310.2387084960938 109.6632614135742 308.0567016601562 Z M 90.69399261474609 308.655029296875 L 82.45873260498047 324.0873413085938 L 74.24105072021484 308.655029296875 C 79.69605255126953 308.0391235351562 85.22141265869141 308.0391235351562 90.69399261474609 308.655029296875 Z M 57.50655364990234 334.6278076171875 L 50.34468078613281 334.6278076171875 L 50.34468078613281 322.4157104492188 C 50.34468078613281 319.318603515625 51.71721649169922 316.4679565429688 53.93441009521484 314.5499267578125 C 56.2747802734375 319.4066162109375 57.48895263671875 324.7384033203125 57.48895263671875 330.140625 L 57.48895263671875 334.6278076171875 Z M 102.431022644043 330.123046875 L 102.431022644043 334.6278076171875 L 62.48643493652344 334.6278076171875 L 62.48643493652344 330.123046875 C 62.48643493652344 323.928955078125 61.04350280761719 317.8052368164062 58.35118865966797 312.2623901367188 C 61.85294342041016 311.0482177734375 65.42508697509766 310.0979614257812 69.03241729736328 309.4292602539062 L 80.27671051025391 330.54541015625 C 81.20935821533203 332.3049926757812 83.72567749023438 332.3049926757812 84.6583251953125 330.54541015625 L 95.90261077880859 309.4292602539062 C 99.50995635986328 310.0979614257812 103.0820999145508 311.0482177734375 106.5838394165039 312.2623901367188 C 103.8739395141602 317.8052368164062 102.431022644043 323.928955078125 102.431022644043 330.123046875 Z M 114.5727462768555 334.6278076171875 L 107.4108810424805 334.6278076171875 L 107.4108810424805 330.123046875 C 107.4108810424805 324.7208251953125 108.6426620483398 319.3890991210938 110.9654312133789 314.5324096679688 C 113.1826248168945 316.4503784179688 114.5551528930664 319.301025390625 114.5551528930664 322.3980712890625 L 114.5551528930664 334.6278076171875 L 114.5727462768555 334.6278076171875 Z">
+							</path>
+						</svg>
+					</div>
+				</div>
+			</div>
+		</div>
+		<div id="User_baa">
+			<svg class="Rectangle_77_bac">
+				<linearGradient id="Rectangle_77_bac" spreadMethod="pad" x1="0" x2="0.975" y1="0" y2="0.991">
+					<stop offset="0" stop-color="#21d4fd" stop-opacity="1"></stop>
+					<stop offset="1" stop-color="#0172d0" stop-opacity="1"></stop>
+				</linearGradient>
+				<rect fill="url(#Rectangle_77_bac)" id="Rectangle_77_bac" rx="10" ry="10" x="0" y="0" width="215" height="243">
+				</rect>
+			</svg>
+			<div id="Business_bad">
+				<span>Business</span>
+			</div>
+			<div id="shop">
+				<div id="Group_240">
+					<div id="Group_239">
+						<svg class="Path_399" viewBox="0 48.096 99.708 80.975">
+							<path fill="rgba(255,255,255,1)" id="Path_399" d="M 95.12486267089844 126.149658203125 L 93.46333312988281 126.149658203125 L 93.46333312988281 82.81913757324219 C 97.21521759033203 80.40493774414062 99.70751953125 76.19521331787109 99.70751953125 71.41159057617188 C 99.70751953125 71.15745544433594 99.64111328125 70.90760040283203 99.51511383056641 70.68695831298828 L 87.92547607421875 50.40504455566406 C 87.11145782470703 48.98090362548828 85.58683013916016 48.09600067138672 83.94652557373047 48.09600067138672 L 15.76099300384521 48.09600067138672 C 14.12068653106689 48.09600067138672 12.59605884552002 48.98070907592773 11.7820405960083 50.40504837036133 L 0.1924043446779251 70.68695831298828 C 0.06640676409006119 70.90760040283203 0 71.15765380859375 0 71.41159057617188 C 0 76.19521331787109 2.492298603057861 80.40493774414062 6.24418306350708 82.81914520263672 L 6.24418306350708 126.149658203125 L 4.582651138305664 126.149658203125 C 3.776032686233521 126.149658203125 3.12209153175354 126.8036041259766 3.12209153175354 127.6102142333984 C 3.12209153175354 128.4168395996094 3.776032686233521 129.0707702636719 4.582651138305664 129.0707702636719 L 95.12487030029297 129.0707702636719 C 95.93168640136719 129.0707702636719 96.58543395996094 128.4168395996094 96.58543395996094 127.6102142333984 C 96.58542633056641 126.8035888671875 95.93148040771484 126.149658203125 95.12486267089844 126.149658203125 Z M 3.02180004119873 72.87214660644531 L 7.704158782958984 72.87214660644531 C 8.510777473449707 72.87214660644531 9.164717674255371 72.21820831298828 9.164717674255371 71.41159057617188 C 9.164717674255371 70.60497283935547 8.510776519775391 69.95103454589844 7.704158782958984 69.95103454589844 L 3.977395296096802 69.95103454589844 L 14.31835079193115 51.85431289672852 C 14.6135778427124 51.33786010742188 15.16625308990479 51.01712036132812 15.76099300384521 51.01712036132812 L 83.94652557373047 51.01712036132812 C 84.54126739501953 51.01712036132812 85.09413909912109 51.33786010742188 85.38916778564453 51.85431289672852 L 95.72993469238281 69.95103454589844 L 92.00238800048828 69.95103454589844 C 91.19557952880859 69.95103454589844 90.54183197021484 70.60497283935547 90.54183197021484 71.41159057617188 C 90.54183197021484 72.21820831298828 91.19557952880859 72.87214660644531 92.00238800048828 72.87214660644531 L 96.68553161621094 72.87214660644531 C 95.97141265869141 78.04914855957031 91.51865386962891 82.04933166503906 86.14846801757812 82.04933166503906 C 80.77848052978516 82.04933166503906 76.32785797119141 78.04876708984375 75.61355590820312 72.87214660644531 L 85.75879669189453 72.87214660644531 C 86.56561279296875 72.87214660644531 87.2193603515625 72.21820831298828 87.2193603515625 71.41159057617188 C 87.2193603515625 70.60497283935547 86.56561279296875 69.95103454589844 85.75879669189453 69.95103454589844 L 13.9495096206665 69.95103454589844 C 13.1428918838501 69.95103454589844 12.48895072937012 70.60497283935547 12.48895072937012 71.41159057617188 C 12.48895072937012 72.21820831298828 13.1428918838501 72.87214660644531 13.9495096206665 72.87214660644531 L 24.09377670288086 72.87214660644531 C 23.37946701049805 78.04876708984375 18.92865371704102 82.04933166503906 13.55885982513428 82.04933166503906 C 8.188674926757812 82.04933166503906 3.735916137695312 78.04914855957031 3.02180004119873 72.87214660644531 Z M 72.48697662353516 72.87214660644531 C 71.77266693115234 78.04876708984375 67.32185363769531 82.04933166503906 61.95206069946289 82.04933166503906 C 56.58206939697266 82.04933166503906 52.13145065307617 78.04876708984375 51.41714477539062 72.87214660644531 L 72.48697662353516 72.87214660644531 Z M 48.29037857055664 72.87214660644531 C 47.57606506347656 78.04876708984375 43.1252555847168 82.04933166503906 37.75545883178711 82.04933166503906 C 32.38566207885742 82.04933166503906 27.93485260009766 78.04876708984375 27.22054290771484 72.87214660644531 L 48.29037857055664 72.87214660644531 Z M 82.73660278320312 126.1498565673828 L 66.92497253417969 126.1498565673828 L 66.92497253417969 121.2655487060547 L 82.73660278320312 121.2655487060547 L 82.73660278320312 126.1498565673828 Z M 82.73660278320312 118.3444213867188 L 66.92497253417969 118.3444213867188 L 66.92497253417969 91.60508728027344 L 82.73660278320312 91.60508728027344 L 82.73660278320312 118.3444213867188 Z M 90.54222106933594 126.1498565673828 L 85.65791320800781 126.1498565673828 L 85.65791320800781 90.14453125 C 85.65791320800781 89.33790588378906 85.00416564941406 88.68396759033203 84.19735717773438 88.68396759033203 L 65.46461486816406 88.68396759033203 C 64.65779876708984 88.68396759033203 64.00405120849609 89.33790588378906 64.00405120849609 90.14453125 L 64.00405120849609 126.149658203125 L 9.165302276611328 126.149658203125 L 9.165302276611328 84.23568725585938 C 10.544264793396 84.70949554443359 12.02118301391602 84.97044372558594 13.55885982513428 84.97044372558594 C 18.83537292480469 84.97044372558594 23.41744041442871 81.94105529785156 25.65715980529785 77.52996826171875 C 27.89687919616699 81.94085693359375 32.47894668579102 84.97044372558594 37.75545883178711 84.97044372558594 C 43.03197479248047 84.97044372558594 47.61404037475586 81.94105529785156 49.853759765625 77.52996826171875 C 52.09347915649414 81.94085693359375 56.67554473876953 84.97044372558594 61.95206069946289 84.97044372558594 C 67.22857666015625 84.97044372558594 71.81063842773438 81.94105529785156 74.05036163330078 77.52996826171875 C 76.29007720947266 81.94085693359375 80.87214660644531 84.97044372558594 86.14865875244141 84.97044372558594 C 87.68633270263672 84.97044372558594 89.16325378417969 84.70949554443359 90.54222106933594 84.23588562011719 L 90.54222106933594 126.1498565673828 Z">
+							</path>
+						</svg>
+					</div>
+				</div>
+				<div id="Group_242">
+					<div id="Group_241">
+						<svg class="Path_400" viewBox="72.145 256.516 45.07 32.582">
+							<path fill="rgba(255,255,255,1)" id="Path_400" d="M 115.7545776367188 256.5159912109375 L 73.60556030273438 256.5159912109375 C 72.79893493652344 256.5159912109375 72.14499664306641 257.169921875 72.14499664306641 257.9765625 L 72.14499664306641 287.6370239257812 C 72.14499664306641 288.4436340332031 72.79893493652344 289.0975646972656 73.60556030273438 289.0975646972656 L 115.7545776367188 289.0975646972656 C 116.5613861083984 289.0975646972656 117.2151336669922 288.4436340332031 117.2151336669922 287.6370239257812 L 117.2151336669922 257.9765625 C 117.2151336669922 257.1697387695312 116.5613861083984 256.5159912109375 115.7545776367188 256.5159912109375 Z M 114.2940139770508 286.1764526367188 L 75.06611633300781 286.1764526367188 L 75.06611633300781 259.4371032714844 L 114.2940139770508 259.4371032714844 L 114.2940139770508 286.1764526367188 Z">
+							</path>
+						</svg>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+</body>
+</html>
