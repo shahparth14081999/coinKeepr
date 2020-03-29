@@ -3,7 +3,9 @@
 	--web-view-id: CU_Consumer_Form;
 	--web-scale-to-fit: true;
 	--web-scale-to-fit-type: width;
-	--web-scale-on-resize: true;
+	--web-enable-scale-up: true;
+	--web-center-horizontally: true;
+	--web-center-vertically: true;
 	--web-enable-deep-linking: true;
 }
 :root {
@@ -17,15 +19,20 @@
 }
 #CU_Consumer_Form {
 	position: absolute;
+	transform: translateX(-50%) translateY(-50%);
+	left: 50%;
+	top: 50%;
 	width: 1920px;
-	height: 1080px;
+	height: 2160px;
 	background-color: rgba(255,255,255,1);
 	overflow: hidden;
 	--web-view-name: CU Consumer Form;
 	--web-view-id: CU_Consumer_Form;
 	--web-scale-to-fit: true;
 	--web-scale-to-fit-type: width;
-	--web-scale-on-resize: true;
+	--web-enable-scale-up: true;
+	--web-center-horizontally: true;
+	--web-center-vertically: true;
 	--web-enable-deep-linking: true;
 }
 @keyframes fadein {

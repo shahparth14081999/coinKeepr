@@ -4,6 +4,8 @@
 	--web-scale-to-fit: true;
 	--web-scale-to-fit-type: width;
 	--web-scale-on-resize: true;
+	--web-center-horizontally: true;
+	--web-center-vertically: true;
 	--web-enable-deep-linking: true;
 }
 :root {
@@ -17,6 +19,9 @@
 }
 #Contact_Us___Consumer {
 	position: absolute;
+	transform: translateX(-50%) translateY(-50%);
+	left: 50%;
+	top: 50%;
 	width: 1920px;
 	height: 1080px;
 	background-color: rgba(255,255,255,1);
@@ -26,6 +31,8 @@
 	--web-scale-to-fit: true;
 	--web-scale-to-fit-type: width;
 	--web-scale-on-resize: true;
+	--web-center-horizontally: true;
+	--web-center-vertically: true;
 	--web-enable-deep-linking: true;
 }
 @keyframes fadein {
